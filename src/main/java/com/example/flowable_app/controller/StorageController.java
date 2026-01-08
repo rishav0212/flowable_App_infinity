@@ -4,6 +4,7 @@ import com.example.flowable_app.service.GoogleDriveService;
 import com.google.api.client.googleapis.json.GoogleJsonResponseException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -23,6 +24,8 @@ import java.util.UUID;
 public class StorageController {
 
     private final GoogleDriveService googleDriveService;
+    @Value("${app.backend.url}")
+    private String backendUrl;
 
     @PostMapping(value = "/gdrive", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> uploadToDrive(
@@ -57,7 +60,8 @@ public class StorageController {
             String fileId = googleDriveService.uploadFile(file, uniqueFileName, folderId);
 
             // 4. Success Response
-            String proxyUrl = "http://localhost:8080/api/storage/proxy/" + fileId;
+
+            String proxyUrl = backendUrl + "/api/storage/proxy/" + fileId;
             Map<String, Object> response = new HashMap<>();
             response.put("name", uniqueFileName);
             response.put("size", file.getSize());
