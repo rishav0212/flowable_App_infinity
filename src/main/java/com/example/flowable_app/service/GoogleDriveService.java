@@ -8,32 +8,50 @@ import com.google.api.services.drive.DriveScopes;
 import com.google.api.services.drive.model.File;
 import com.google.auth.http.HttpCredentialsAdapter;
 import com.google.auth.oauth2.GoogleCredentials;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collections;
 
-@Service public class GoogleDriveService {
+@Service
+public class GoogleDriveService {
 
-    // ⚠️ Make sure this file exists in src/main/resources
-    private static final String CREDENTIALS_FILE_PATH = "/google-drive-key.json";
-    private static final String APPLICATION_NAME = "FlowableApp";
+    private static final String APPLICATION_NAME = "InfinityServices";
+
+    @Value("${google.drive.credentials.path:}")
+    private String credentialsPath;
 
     private Drive getDriveService() throws IOException {
         GoogleCredentials credentials;
-        try {
-            // 1. Try local file
-            InputStream keyFile = getClass().getResourceAsStream(CREDENTIALS_FILE_PATH);
-            if (keyFile != null) {
-                credentials = GoogleCredentials.fromStream(keyFile);
-            } else {
-                // 2. Fallback to Cloud Run Identity
+
+        // 🟢 FIX: Logic to handle External File vs Internal Resource vs Default
+        if (credentialsPath != null && !credentialsPath.isEmpty()) {
+            // Case 1: Path provided (Production / Mounted Secret)
+            try (InputStream keyStream = new FileInputStream(credentialsPath)) {
+                credentials = GoogleCredentials.fromStream(keyStream);
+                System.out.println("✅ Loaded Drive Credentials from file system: " + credentialsPath);
+            } catch (IOException e) {
+                System.err.println("⚠️ Failed to load credentials from path: " +
+                        credentialsPath +
+                        ". Falling back to default.");
                 credentials = GoogleCredentials.getApplicationDefault();
             }
-        } catch (IOException e) {
-            credentials = GoogleCredentials.getApplicationDefault();
+        } else {
+            // Case 2: No path provided (Dev / Fallback)
+            // Try to find "google-drive-key.json" inside the JAR (Classpath)
+            InputStream keyFile = getClass().getResourceAsStream("/google-drive-key.json");
+            if (keyFile != null) {
+                credentials = GoogleCredentials.fromStream(keyFile);
+                System.out.println("✅ Loaded Drive Credentials from classpath.");
+            } else {
+                // Case 3: Cloud Run Default Identity
+                credentials = GoogleCredentials.getApplicationDefault();
+                System.out.println("ℹ️ Using Application Default Credentials.");
+            }
         }
 
         credentials = credentials.createScoped(Collections.singleton(DriveScopes.DRIVE_FILE));
@@ -44,43 +62,32 @@ import java.util.Collections;
                 .setApplicationName(APPLICATION_NAME)
                 .build();
     }
+
     /**
      * Uploads a file to a specific Google Drive Folder.
-     * * @param multipartFile The file content to upload.
-     *
-     * @param customFileName The name to save the file as in Drive.
-     * @param targetFolderId REQUIRED. The ID of the destination folder in Google Drive.
-     * @return The ID of the uploaded file.
-     * @throws IOException              If Google API fails.
-     * @throws IllegalArgumentException If targetFolderId is missing.
      */
     public String uploadFile(MultipartFile multipartFile, String customFileName, String targetFolderId) throws
             IOException {
-        // 🟢 VALIDATION: Fail if no folder ID is provided (Strict Mode)
         if (targetFolderId == null || targetFolderId.trim().isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Target Folder ID is required. Please check your Form.io URL configuration.");
+            throw new IllegalArgumentException("Target Folder ID is required.");
         }
 
         Drive service = getDriveService();
 
         File fileMetadata = new File();
         fileMetadata.setName(customFileName);
-
-        // 🟢 USE PASSED FOLDER ID
         fileMetadata.setParents(Collections.singletonList(targetFolderId));
 
-        InputStreamContent
-                mediaContent =
-                new InputStreamContent(multipartFile.getContentType(), multipartFile.getInputStream());
+        InputStreamContent mediaContent = new InputStreamContent(
+                multipartFile.getContentType(),
+                multipartFile.getInputStream()
+        );
 
-        File
-                file =
-                service.files()
-                        .create(fileMetadata, mediaContent)
-                        .setFields("id")
-                        .setSupportsAllDrives(true) // Important for Shared Drives
-                        .execute();
+        File file = service.files()
+                .create(fileMetadata, mediaContent)
+                .setFields("id")
+                .setSupportsAllDrives(true)
+                .execute();
 
         return file.getId();
     }
@@ -100,8 +107,8 @@ import java.util.Collections;
         Drive service = getDriveService();
         return service.files()
                 .get(fileId)
-                .setFields("id, name, mimeType, size") // Ask Google for these specific details
-                .setSupportsAllDrives(true)            // Important for Shared Drives
+                .setFields("id, name, mimeType, size")
+                .setSupportsAllDrives(true)
                 .execute();
     }
 }
