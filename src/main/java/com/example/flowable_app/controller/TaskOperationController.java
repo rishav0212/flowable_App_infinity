@@ -30,11 +30,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@RestController
-@RequestMapping("/api/workflow")
-@RequiredArgsConstructor
-@Slf4j
-public class TaskOperationController {
+@RestController @RequestMapping("/api/workflow") @RequiredArgsConstructor @Slf4j public class TaskOperationController {
 
     private final TaskService taskService;
     private final RuntimeService runtimeService;
@@ -48,8 +44,7 @@ public class TaskOperationController {
     // =========================================================================
     // 1. RENDER ENDPOINT
     // =========================================================================
-    @GetMapping("/tasks/{taskId}/render")
-    public ResponseEntity<?> renderTask(@PathVariable String taskId) {
+    @GetMapping("/tasks/{taskId}/render") public ResponseEntity<?> renderTask(@PathVariable String taskId) {
         log.info("🔍 RENDER: Fetching details for taskId=[{}]", taskId);
 
         try {
@@ -90,7 +85,8 @@ public class TaskOperationController {
                 }
             } catch (Exception e) {
                 log.error("⚠️ BPMN PROPERTY ERROR: Could not load extension elements for task [{}]. Error: {}",
-                        taskId, e.getMessage());
+                        taskId,
+                        e.getMessage());
                 // Don't fail the whole render just because buttons failed to load
             }
 
@@ -104,10 +100,36 @@ public class TaskOperationController {
                 }
             } catch (Exception e) {
                 log.error("❌ FORM.IO ERROR: Fetch failed for key=[{}] on task [{}]: {}",
-                        task.getFormKey(), taskId, e.getMessage());
+                        task.getFormKey(),
+                        taskId,
+                        e.getMessage());
                 // Continue so the user can at least see the task details, even if the form fails
             }
+// 👇 1. FETCH PROCESS CONTEXT (Business Key & Process Name)
+            String businessKey = null;
+            String processName = null;
 
+            if (task.getProcessInstanceId() != null) {
+                ProcessInstance
+                        processInstance =
+                        runtimeService.createProcessInstanceQuery()
+                                .processInstanceId(task.getProcessInstanceId())
+                                .singleResult();
+
+                if (processInstance != null) {
+                    businessKey = processInstance.getBusinessKey();
+                    processName = processInstance.getProcessDefinitionName();
+                }
+            }
+
+            // Fallback: If processName is still null (rare), fetch from definition
+            if (processName == null && task.getProcessDefinitionId() != null) {
+                try {
+                    processName = repositoryService.getProcessDefinition(task.getProcessDefinitionId()).getName();
+                } catch (Exception e) {
+                    log.warn("⚠️ Could not fetch process name for definition [{}]", task.getProcessDefinitionId());
+                }
+            }
             log.info("✅ RENDER SUCCESS: Returning payload for task [{}], name=[{}]", taskId, task.getName());
             return ResponseEntity.ok(TaskRenderDto.builder()
                     .taskId(task.getId())
@@ -115,6 +137,8 @@ public class TaskOperationController {
                     .assignee(task.getAssignee())
                     .description(task.getDescription())
                     .priority(task.getPriority())
+                    .businessKey(businessKey)
+                    .processName(processName)
                     .createTime(task.getCreateTime())
                     .dueDate(task.getDueDate())
                     .processInstanceId(task.getProcessInstanceId())
@@ -145,16 +169,15 @@ public class TaskOperationController {
     // =========================================================================
     // 2. SUBMIT ENDPOINT (COMPLETE OR UPDATE TASK)
     // =========================================================================
-    @PostMapping("/tasks/{taskId}/submit")
-    public ResponseEntity<?> completeTask(@PathVariable String taskId, @RequestBody TaskSubmitDto payload) {
+    @PostMapping("/tasks/{taskId}/submit") public ResponseEntity<?> completeTask(
+            @PathVariable String taskId, @RequestBody TaskSubmitDto payload) {
         log.info("🚀 SUBMIT: Processing task [{}]. CompleteFlag=[{}]", taskId, payload.getCompleteTask());
 
         try {
             Task task = taskService.createTaskQuery().taskId(taskId).singleResult();
             if (task == null) {
                 log.warn("⚠️ SUBMIT FAILED: Task [{}] not found", taskId);
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body(Map.of("error", "Task not found"));
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Task not found"));
             }
 
             String
@@ -163,11 +186,9 @@ public class TaskOperationController {
             log.debug("📝 Processing submission using formKey=[{}]", targetFormKey);
 
             log.info("🧩 DELEGATING: Calling FormSchemaService for form=[{}]", targetFormKey);
-            FormSchemaService.SubmissionResult result = formSchemaService.processSubmission(
-                    targetFormKey,
-                    payload.getFormData(),
-                    payload.getVariables()
-            );
+            FormSchemaService.SubmissionResult
+                    result =
+                    formSchemaService.processSubmission(targetFormKey, payload.getFormData(), payload.getVariables());
 
             Map<String, Object> localVars = new HashMap<>();
             localVars.put("formSubmissionId", result.getSubmissionId());
@@ -182,18 +203,15 @@ public class TaskOperationController {
                 // 🟢 CRITICAL MOMENT: This triggers the Flowable Transaction.
                 taskService.complete(taskId, result.getProcessVariables());
 
-                return ResponseEntity.ok(Map.of(
-                        "message", "Task Completed",
-                        "submissionId", result.getSubmissionId()
-                ));
+                return ResponseEntity.ok(Map.of("message", "Task Completed", "submissionId", result.getSubmissionId()));
             } else {
                 log.info("💾 ACTION: Updating task [{}] variables (Draft Mode)", taskId);
                 taskService.setVariables(taskId, result.getProcessVariables());
 
-                return ResponseEntity.ok(Map.of(
-                        "message", "Task Saved (Draft)",
-                        "submissionId", result.getSubmissionId()
-                ));
+                return ResponseEntity.ok(Map.of("message",
+                        "Task Saved (Draft)",
+                        "submissionId",
+                        result.getSubmissionId()));
             }
 
         } catch (Exception e) {
@@ -222,30 +240,29 @@ public class TaskOperationController {
     }
 
     // START PROCESS ENDPOINT
-    @PostMapping("/process/{processDefinitionKey}/start")
-    public ResponseEntity<?> startProcess(
+    @PostMapping("/process/{processDefinitionKey}/start") public ResponseEntity<?> startProcess(
             @PathVariable String processDefinitionKey, @RequestBody TaskSubmitDto payload) {
         log.info("🏗️ START PROCESS: Initiating instance for definition=[{}]", processDefinitionKey);
         try {
-            FormSchemaService.SubmissionResult result = formSchemaService.processSubmission(
-                    payload.getSubmittedFormKey(),
-                    payload.getFormData(),
-                    payload.getVariables()
-            );
+            FormSchemaService.SubmissionResult
+                    result =
+                    formSchemaService.processSubmission(payload.getSubmittedFormKey(),
+                            payload.getFormData(),
+                            payload.getVariables());
 
             log.info("🌟 STARTING: Mapping initial variables and creating process instance...");
             result.getProcessVariables().put("initiator", "user");
 
-            ProcessInstance processInstance = runtimeService.startProcessInstanceByKey(
-                    processDefinitionKey,
-                    result.getProcessVariables()
-            );
+            ProcessInstance
+                    processInstance =
+                    runtimeService.startProcessInstanceByKey(processDefinitionKey, result.getProcessVariables());
 
             log.info("✅ START SUCCESS: Instance created with ID=[{}]", processInstance.getId());
-            return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
-                    "message", "Process Started Successfully",
-                    "processInstanceId", processInstance.getId()
-            ));
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(Map.of("message",
+                            "Process Started Successfully",
+                            "processInstanceId",
+                            processInstance.getId()));
 
         } catch (Exception e) {
             log.error("❌ START ERROR: Failed to initiate process [{}]: {}", processDefinitionKey, e.getMessage(), e);
@@ -257,22 +274,24 @@ public class TaskOperationController {
     // =========================================================================
     // 3. HISTORY TIMELINE ENDPOINT
     // =========================================================================
-    @GetMapping("/process/{processInstanceId}/history")
-    public ResponseEntity<?> getProcessHistory(@PathVariable String processInstanceId) {
+    @GetMapping("/process/{processInstanceId}/history") public ResponseEntity<?> getProcessHistory(
+            @PathVariable String processInstanceId) {
         log.info("🕰️ HISTORY: Fetching timeline for process [{}]", processInstanceId);
 
         try {
-            List<HistoricActivityInstance> activities = historyService.createHistoricActivityInstanceQuery()
-                    .processInstanceId(processInstanceId)
-                    .orderByHistoricActivityInstanceStartTime().desc()
-                    .list();
+            List<HistoricActivityInstance>
+                    activities =
+                    historyService.createHistoricActivityInstanceQuery()
+                            .processInstanceId(processInstanceId)
+                            .orderByHistoricActivityInstanceStartTime()
+                            .desc()
+                            .list();
 
             if (activities.isEmpty() &&
                     historyService.createHistoricProcessInstanceQuery()
                             .processInstanceId(processInstanceId)
                             .singleResult() == null) {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body(Map.of("error", "Process instance not found"));
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Process instance not found"));
             }
 
             List<Map<String, Object>> timeline = new ArrayList<>();
@@ -289,9 +308,9 @@ public class TaskOperationController {
                 event.put("status", act.getEndTime() != null ? "COMPLETED" : "ACTIVE");
 
                 if ("userTask".equals(act.getActivityType()) && act.getTaskId() != null) {
-                    HistoricTaskInstance task = historyService.createHistoricTaskInstanceQuery()
-                            .taskId(act.getTaskId())
-                            .singleResult();
+                    HistoricTaskInstance
+                            task =
+                            historyService.createHistoricTaskInstanceQuery().taskId(act.getTaskId()).singleResult();
 
                     if (task != null) {
                         event.put("taskId", task.getId());
@@ -300,9 +319,7 @@ public class TaskOperationController {
 
                         List<HistoricVariableInstance>
                                 taskVariables =
-                                historyService.createHistoricVariableInstanceQuery()
-                                        .taskId(act.getTaskId())
-                                        .list();
+                                historyService.createHistoricVariableInstanceQuery().taskId(act.getTaskId()).list();
 
                         for (HistoricVariableInstance var : taskVariables) {
                             if ("formSubmissionId".equals(var.getVariableName())) {
@@ -338,9 +355,11 @@ public class TaskOperationController {
     public ResponseEntity<?> getProcessXml(@PathVariable String processInstanceId) {
         log.info("📜 XML REQUEST: Fetching BPMN for process [{}]", processInstanceId);
         try {
-            HistoricProcessInstance processInstance = historyService.createHistoricProcessInstanceQuery()
-                    .processInstanceId(processInstanceId)
-                    .singleResult();
+            HistoricProcessInstance
+                    processInstance =
+                    historyService.createHistoricProcessInstanceQuery()
+                            .processInstanceId(processInstanceId)
+                            .singleResult();
 
             if (processInstance == null) {
                 log.warn("⚠️ XML FAILED: Process instance [{}] not found", processInstanceId);
@@ -362,23 +381,27 @@ public class TaskOperationController {
     public ResponseEntity<?> getHighlights(@PathVariable String processInstanceId) {
         log.info("🎨 HIGHLIGHTS: Fetching active/completed nodes for process [{}]", processInstanceId);
         try {
-            List<String> completedIds = historyService.createHistoricActivityInstanceQuery()
-                    .processInstanceId(processInstanceId)
-                    .finished()
-                    .list()
-                    .stream()
-                    .map(HistoricActivityInstance::getActivityId)
-                    .distinct()
-                    .toList();
+            List<String>
+                    completedIds =
+                    historyService.createHistoricActivityInstanceQuery()
+                            .processInstanceId(processInstanceId)
+                            .finished()
+                            .list()
+                            .stream()
+                            .map(HistoricActivityInstance::getActivityId)
+                            .distinct()
+                            .toList();
 
-            List<String> activeIds = runtimeService.createActivityInstanceQuery()
-                    .processInstanceId(processInstanceId)
-                    .unfinished()
-                    .list()
-                    .stream()
-                    .map(org.flowable.engine.runtime.ActivityInstance::getActivityId)
-                    .distinct()
-                    .toList();
+            List<String>
+                    activeIds =
+                    runtimeService.createActivityInstanceQuery()
+                            .processInstanceId(processInstanceId)
+                            .unfinished()
+                            .list()
+                            .stream()
+                            .map(org.flowable.engine.runtime.ActivityInstance::getActivityId)
+                            .distinct()
+                            .toList();
 
             log.info("📤 HIGHLIGHTS SUCCESS: CompletedNodes={}, ActiveNodes={}", completedIds.size(), activeIds.size());
             return ResponseEntity.ok(Map.of("completed", completedIds, "active", activeIds));

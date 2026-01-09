@@ -22,7 +22,8 @@ public class TaskRenderDto {
 
     // Process Context
     private String processInstanceId;
-    private String businessKey; // Optional, but good for Header display (e.g., "Order #123")
+    private String businessKey;
+    private String processName;
 
     // The Payload
     private Map<String, Object> data; // The Merged Variables

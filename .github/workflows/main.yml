@@ -1,44 +1,45 @@
-name: Deploy Backend (Flowable)
+name: Deploy Backend (From Zip)
 
 on:
   push:
-    branches: [ "main" ]
-    paths:
-      - 'flowable-app/**'
-  workflow_dispatch:
+    branches: "**"
 
 env:
   PROJECT_ID: myfirsttestproject-456102
   REGION: asia-south2
+  # 🟢 USING OLDER ARTIFACT REGISTRY (The one that works)
   GAR_LOCATION: asia-south2-docker.pkg.dev/myfirsttestproject-456102/infinity-images
   SERVICE_NAME: flowable-app-backend
-  # The account the App uses while RUNNING (needs Secret Accessor permission)
   RUNTIME_SERVICE_ACCOUNT: jinsan-sheet-access-account@myfirsttestproject-456102.iam.gserviceaccount.com
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-
     permissions:
       contents: read
-      id-token: write # Required for Workload Identity Federation
-
-    defaults:
-      run:
-        working-directory: ./flowable-app
+      id-token: write # Required for Workload Identity
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. Authenticate to Google Cloud (Secure WIF)
+      # 🟢 NEW STEP: Unzip the code
+      # This extracts 'flowable-app.zip' into a folder named 'flowable-app'
+      - name: Unzip Flowable Code
+        run: |
+          unzip flowable-app.zip -d extracted_app
+          # Move contents if nested, or just set context to extracted_app/flowable-app
+          # Assuming the zip contains the folder "flowable-app" at the top level:
+          ls -R extracted_app
+
+      # 1. Authenticate to Google Cloud (WIF)
       - name: Authenticate to Google Cloud
         id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: projects/493376716946/locations/global/workloadIdentityPools/github-wif-pool/providers/github-provider-3
           service_account: github-actions-sa-saarbiotech@myfirsttestproject-456102.iam.gserviceaccount.com
-          token_format: 'access_token'
+          token_format: "access_token"
 
       # 2. Setup Docker Buildx
       - name: Set up Docker Buildx
@@ -49,14 +50,17 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: asia-south2-docker.pkg.dev
-          username: 'oauth2accesstoken'
-          password: '${{ steps.auth.outputs.access_token }}'
+          username: "oauth2accesstoken"
+          password: "${{ steps.auth.outputs.access_token }}"
 
       # 4. Build and Push
+      # We build from the UNZIPPED folder
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
-          context: ./flowable-app
+          # 🟢 Point to the folder where you unzipped the code.
+          # Adjust 'extracted_app/flowable-app' if the zip has a different internal structure.
+          context: ./extracted_app/flowable-app
           push: true
           tags: ${{ env.GAR_LOCATION }}/flowable-app:latest
           cache-from: type=gha
@@ -74,6 +78,11 @@ jobs:
             --port=8080
             --service-account=${{ env.RUNTIME_SERVICE_ACCOUNT }}
             --add-cloudsql-instances=myfirsttestproject-456102:asia-south2:infinity-production
+            --memory=2Gi
+            --cpu=2
+            --max-instances=3
+            --timeout=1000s
+            --cpu-boost
           env_vars: |
             SPRING_CLOUD_GCP_SQL_DATABASE_NAME=infinity_flowable_db
             SPRING_CLOUD_GCP_SQL_INSTANCE_CONNECTION_NAME=myfirsttestproject-456102:asia-south2:infinity-production
@@ -87,9 +96,8 @@ jobs:
             SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_REDIRECT_URI=https://flowable-app-backend-493376716946.asia-south2.run.app/login/oauth2/code/google
             SERVER_FORWARD_HEADERS_STRATEGY=framework
             APP_BACKEND_URL=https://flowable-app-backend-493376716946.asia-south2.run.app
-          # 🟢 PROPER SECRET MAPPING (Env Var = Secret Name : Version)
           secrets: |
-            SPRING_DATASOURCE_PASSWORD=FLOWABLE_DB_PASSWORD:latest
-            FORMIO_ADMIN_PASSWORD=FLOWABLE_FORMIO_ADMIN_PASSWORD:latest
-            GOOGLE_CLIENT_SECRET=FLOWABLE_GOOGLE_CLIENT_SECRET:latest
-            APP_JWT_SECRET=FLOWABLE_APP_JWT_SECRET:latest
+            SPRING_DATASOURCE_PASSWORD=INFINITY_DB_PASSWORD:latest
+            FORMIO_ADMIN_PASSWORD=INFINITY_FORMIO_ADMIN_KEY:latest
+            GOOGLE_CLIENT_SECRET=INFINITY_GOOGLE_CLIENT_SECRET:latest
+            APP_JWT_SECRET=INFINITY_JWT_SIGNING_KEY:latest
