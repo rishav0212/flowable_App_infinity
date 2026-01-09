@@ -12,17 +12,16 @@ env:
   REGION: asia-south2
   GAR_LOCATION: asia-south2-docker.pkg.dev/myfirsttestproject-456102/infinity-images
   SERVICE_NAME: flowable-app-backend
-  # This is the Service Account the APP runs as (Runtime Identity)
+  # The account the App uses while RUNNING (needs Secret Accessor permission)
   RUNTIME_SERVICE_ACCOUNT: jinsan-sheet-access-account@myfirsttestproject-456102.iam.gserviceaccount.com
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
-    # 🟢 REQUIRED: Permissions for OIDC (Workload Identity)
     permissions:
       contents: read
-      id-token: write
+      id-token: write # Required for Workload Identity Federation
 
     defaults:
       run:
@@ -32,21 +31,20 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. Authenticate to Google Cloud using WIF (No JSON Keys!)
+      # 1. Authenticate to Google Cloud (Secure WIF)
       - name: Authenticate to Google Cloud
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          # Using the exact values from your email-service pipeline
           workload_identity_provider: projects/493376716946/locations/global/workloadIdentityPools/github-wif-pool/providers/github-provider-3
           service_account: github-actions-sa-saarbiotech@myfirsttestproject-456102.iam.gserviceaccount.com
-          token_format: 'access_token' # We need this for Docker Login
+          token_format: 'access_token'
 
       # 2. Setup Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 3. Login to Artifact Registry (Using the temporary token)
+      # 3. Login to Artifact Registry
       - name: Docker Auth
         uses: docker/login-action@v3
         with:
@@ -54,7 +52,7 @@ jobs:
           username: 'oauth2accesstoken'
           password: '${{ steps.auth.outputs.access_token }}'
 
-      # 4. Build and Push (With Caching)
+      # 4. Build and Push
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
@@ -89,8 +87,9 @@ jobs:
             SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_REDIRECT_URI=https://flowable-app-backend-493376716946.asia-south2.run.app/login/oauth2/code/google
             SERVER_FORWARD_HEADERS_STRATEGY=framework
             APP_BACKEND_URL=https://flowable-app-backend-493376716946.asia-south2.run.app
+          # 🟢 PROPER SECRET MAPPING (Env Var = Secret Name : Version)
           secrets: |
-            SPRING_DATASOURCE_PASSWORD=DB_PASSWORD:latest
-            FORMIO_ADMIN_PASSWORD=FORMIO_ADMIN_PASSWORD:latest
-            GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest
-            APP_JWT_SECRET=APP_JWT_SECRET:latest
+            SPRING_DATASOURCE_PASSWORD=FLOWABLE_DB_PASSWORD:latest
+            FORMIO_ADMIN_PASSWORD=FLOWABLE_FORMIO_ADMIN_PASSWORD:latest
+            GOOGLE_CLIENT_SECRET=FLOWABLE_GOOGLE_CLIENT_SECRET:latest
+            APP_JWT_SECRET=FLOWABLE_APP_JWT_SECRET:latest
