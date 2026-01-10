@@ -80,7 +80,7 @@ jobs:
             SPRING_CLOUD_GCP_SQL_INSTANCE_CONNECTION_NAME=myfirsttestproject-456102:asia-south2:infinity-production
             SPRING_DATASOURCE_USERNAME=infinity-flowable-test
             SPRING_FORMIO_URL=https://infinity-formio-server-493376716946.asia-south2.run.app
-            SPRING_APP_FRONTEND_URL=https://infinity-plus-workflow.vercel.app/
+            SPRING_APP_FRONTEND_URL=https://infinity-plus.saarbiotech.in/
             SPRING_FORMIO_ADMIN_EMAIL=admin@example.com
             SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_ID=493376716946-ttnbp0o0mfp8tig8p62ittp2tb5q9coe.apps.googleusercontent.com
             SPRING_CLOUD_GCP_CREDENTIALS_LOCATION=
