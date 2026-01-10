@@ -7,10 +7,11 @@ on:
 env:
   PROJECT_ID: myfirsttestproject-456102
   REGION: asia-south2
-  # 🟢 USING ARTIFACT REGISTRY
+  # 🟢 USING OLDER ARTIFACT REGISTRY (The one that works)
   GAR_LOCATION: asia-south2-docker.pkg.dev/myfirsttestproject-456102/infinity-images
-  SERVICE_NAME: flowable-app-backend
-  RUNTIME_SERVICE_ACCOUNT: jinsan-sheet-access-account@myfirsttestproject-456102.iam.gserviceaccount.com
+  SERVICE_NAME: infinity-plus-services
+  RUNTIME_SERVICE_ACCOUNT: infinityplus-services-runtime@myfirsttestproject-456102.iam.gserviceaccount.com
+
 
 jobs:
   build-and-deploy:
@@ -53,7 +54,7 @@ jobs:
           # If your Dockerfile is in a subfolder, change '.' to './folder-name'
           context: .
           push: true
-          tags: ${{ env.GAR_LOCATION }}/flowable-app:latest
+          tags: ${{ env.GAR_LOCATION }}/infinity-plus-services:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -63,7 +64,7 @@ jobs:
         with:
           service: ${{ env.SERVICE_NAME }}
           region: ${{ env.REGION }}
-          image: ${{ env.GAR_LOCATION }}/flowable-app:latest
+          image: ${{ env.GAR_LOCATION }}/infinity-plus-services:latest
           flags: |
             --allow-unauthenticated
             --port=8080
@@ -78,17 +79,16 @@ jobs:
             SPRING_CLOUD_GCP_SQL_DATABASE_NAME=infinity_flowable_db
             SPRING_CLOUD_GCP_SQL_INSTANCE_CONNECTION_NAME=myfirsttestproject-456102:asia-south2:infinity-production
             SPRING_DATASOURCE_USERNAME=infinity-flowable-test
-            SPRING_DATASOURCE_URL=jdbc:mysql://localhost/infinity_flowable_db
-            FORMIO_URL=https://infinity-formio-server-493376716946.asia-south2.run.app
-            APP_FRONTEND_URL=https://workflow-ui-react.vercel.app/
-            FORMIO_ADMIN_EMAIL=admin@example.com
+            SPRING_FORMIO_URL=https://infinity-formio-server-493376716946.asia-south2.run.app
+            SPRING_APP_FRONTEND_URL=https://infinity-plus-workflow.vercel.app/
+            SPRING_FORMIO_ADMIN_EMAIL=admin@example.com
             SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_ID=493376716946-ttnbp0o0mfp8tig8p62ittp2tb5q9coe.apps.googleusercontent.com
             SPRING_CLOUD_GCP_CREDENTIALS_LOCATION=
-            SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_REDIRECT_URI=https://flowable-app-backend-493376716946.asia-south2.run.app/login/oauth2/code/google
+            SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_REDIRECT_URI=https://infinity-plus-services-493376716946.asia-south2.run.app/login/oauth2/code/google
             SERVER_FORWARD_HEADERS_STRATEGY=framework
-            APP_BACKEND_URL=https://flowable-app-backend-493376716946.asia-south2.run.app
+            SPRING_APP_BACKEND_URL=https://infinity-plus-services-493376716946.asia-south2.run.app
           secrets: |
             SPRING_DATASOURCE_PASSWORD=INFINITY_DB_PASSWORD:latest
-            FORMIO_ADMIN_PASSWORD=INFINITY_FORMIO_ADMIN_KEY:latest
-            GOOGLE_CLIENT_SECRET=INFINITY_GOOGLE_CLIENT_SECRET:latest
-            APP_JWT_SECRET=INFINITY_JWT_SIGNING_KEY:latest
+            SPRING_FORMIO_ADMIN_PASSWORD=INFINITY_FORMIO_ADMIN_KEY:latest
+            SPRING_SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_SECRET=INFINITY_GOOGLE_CLIENT_SECRET:latest
+            SPRING_APP_JWT_SECRET=INFINITY_JWT_SIGNING_KEY:latest
