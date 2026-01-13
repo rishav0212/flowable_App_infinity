@@ -22,7 +22,7 @@ public class GoogleDriveService {
 
     private static final String APPLICATION_NAME = "InfinityServices";
 
-    @Value("${google.drive.credentials.path:}")
+    @Value("${google.drive.credentials.path:/app/secrets/drive-sa-key.json}")
     private String credentialsPath;
 
     private Drive getDriveService() throws IOException {

@@ -92,3 +92,4 @@ jobs:
             SPRING_FORMIO_ADMIN_PASSWORD=INFINITY_FORMIO_ADMIN_KEY:latest
             SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_SECRET=INFINITY_GOOGLE_CLIENT_SECRET:latest
             SPRING_APP_JWT_SECRET=INFINITY_JWT_SIGNING_KEY:latest
+            /app/secrets/drive-sa-key.json=infinityplus-gdrive-connector-key:latest
