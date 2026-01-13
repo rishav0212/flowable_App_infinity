@@ -1,21 +1,21 @@
 package com.example.flowable_app.config; // <--- Note the package is 'config'
 
 
-import io.jsonwebtoken.*;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
 import java.security.Key;
 import java.util.Date;
-import org.springframework.beans.factory.annotation.Value;
 
 @Component
 public class JwtUtils {
+    private static final long EXPIRATION_MS = 3*86400000;
     // ⚠️ In production, put this in application.properties
     @Value("${app.jwt.secret}")
     private String secret;
-
-    private static final long EXPIRATION_MS = 86400000;
-
     private Key key;
 
     // We need to initialize the key AFTER the secret is injected
