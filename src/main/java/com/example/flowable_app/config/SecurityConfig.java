@@ -48,6 +48,10 @@ public class SecurityConfig {
                         .requestMatchers(AntPathRequestMatcher.antMatcher("/login/**")).permitAll()
                         .requestMatchers(AntPathRequestMatcher.antMatcher(HttpMethod.GET, "/api/forms/form/*/submission/**")).permitAll()
                         .requestMatchers(AntPathRequestMatcher.antMatcher("/api/storage/**")).permitAll()
+                        // 1. Allow Swagger UI & API Docs (Add these lines)
+                        .requestMatchers(new AntPathRequestMatcher("/v3/api-docs/**")).permitAll()
+                        .requestMatchers(new AntPathRequestMatcher("/swagger-ui/**")).permitAll()
+                        .requestMatchers(new AntPathRequestMatcher("/swagger-ui.html")).permitAll()
                         // All other API calls require the JWT badge
                         .anyRequest().authenticated()
                 )

@@ -6,6 +6,11 @@ import com.example.flowable_app.dto.TaskSubmitDto;
 import com.example.flowable_app.service.DataMirrorService;
 import com.example.flowable_app.service.FormSchemaService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.IOUtils;
@@ -30,7 +35,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@RestController @RequestMapping("/api/workflow") @RequiredArgsConstructor @Slf4j public class TaskOperationController {
+@RestController
+@RequestMapping("/api/workflow")
+@RequiredArgsConstructor
+@Slf4j
+@Tag(name = "Workflow Operations",
+        description = "Core endpoints for managing User Tasks, starting Processes, and retrieving Process History.")
+public class TaskOperationController {
 
     private final TaskService taskService;
     private final RuntimeService runtimeService;
@@ -44,7 +55,24 @@ import java.util.Map;
     // =========================================================================
     // 1. RENDER ENDPOINT
     // =========================================================================
-    @GetMapping("/tasks/{taskId}/render") public ResponseEntity<?> renderTask(@PathVariable String taskId) {
+    @Operation(
+            summary = "Render Task Details & Form Schema",
+            description = "Retrieves all necessary data to render a User Task in the frontend. This includes: \n" +
+                    "1. **Task Metadata** (ID, name, assignee, priority).\n" +
+                    "2. **Process Context** (Business Key, Process Name).\n" +
+                    "3. **Form Schema** (Fetched dynamically from Form.io using the task's formKey).\n" +
+                    "4. **Current Variables** (Pre-filled data for the form).\n" +
+                    "5. **BPMN Extension Elements** (Scans XML for 'externalActions' to configure UI buttons)."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Successfully retrieved task render data"),
+            @ApiResponse(responseCode = "404", description = "Task not found"),
+            @ApiResponse(responseCode = "500", description = "Internal error during BPMN parsing or Form fetching")
+    })
+    @GetMapping("/tasks/{taskId}/render")
+    public ResponseEntity<?> renderTask(
+            @Parameter(description = "Unique identifier of the Flowable User Task", required = true)
+            @PathVariable String taskId) {
         log.info("🔍 RENDER: Fetching details for taskId=[{}]", taskId);
 
         try {
@@ -105,7 +133,7 @@ import java.util.Map;
                         e.getMessage());
                 // Continue so the user can at least see the task details, even if the form fails
             }
-// 👇 1. FETCH PROCESS CONTEXT (Business Key & Process Name)
+            // 👇 1. FETCH PROCESS CONTEXT (Business Key & Process Name)
             String businessKey = null;
             String processName = null;
 
@@ -153,8 +181,16 @@ import java.util.Map;
         }
     }
 
+    @Operation(
+            summary = "Claim a Task",
+            description = "Assigns a specific task to the user identified by the 'userId' header. " +
+                    "This prevents other users from seeing or working on this task."
+    )
     @PostMapping("/claim-task")
-    public ResponseEntity<?> claimTask(@RequestParam String taskId, @RequestHeader("userId") String userId) {
+    public ResponseEntity<?> claimTask(
+            @Parameter(description = "ID of the task to claim", required = true) @RequestParam String taskId,
+            @Parameter(description = "ID of the user claiming the task", required = true) @RequestHeader("userId")
+            String userId) {
         log.info("✋ CLAIM: User [{}] is claiming task [{}]", userId, taskId);
         try {
             taskService.claim(taskId, userId);
@@ -169,8 +205,22 @@ import java.util.Map;
     // =========================================================================
     // 2. SUBMIT ENDPOINT (COMPLETE OR UPDATE TASK)
     // =========================================================================
-    @PostMapping("/tasks/{taskId}/submit") public ResponseEntity<?> completeTask(
-            @PathVariable String taskId, @RequestBody TaskSubmitDto payload) {
+    @Operation(
+            summary = "Complete or Save Task",
+            description = "Handles form submission for a User Task. Supports two modes:\n" +
+                    "1. **Complete (True):** Validates data, finishes the task, and moves the workflow to the next step.\n" +
+                    "2. **Draft (False):** Saves the variables to the task but keeps it active for later editing.\n" +
+                    "Stores a 'submissionId' reference back to the original Form.io submission."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Task processed successfully (Completed or Saved)"),
+            @ApiResponse(responseCode = "422", description = "Process logic failed (e.g. Email error, Script failure)"),
+            @ApiResponse(responseCode = "404", description = "Task not found")
+    })
+    @PostMapping("/tasks/{taskId}/submit")
+    public ResponseEntity<?> completeTask(
+            @PathVariable String taskId,
+            @RequestBody TaskSubmitDto payload) {
         log.info("🚀 SUBMIT: Processing task [{}]. CompleteFlag=[{}]", taskId, payload.getCompleteTask());
 
         try {
@@ -240,8 +290,15 @@ import java.util.Map;
     }
 
     // START PROCESS ENDPOINT
-    @PostMapping("/process/{processDefinitionKey}/start") public ResponseEntity<?> startProcess(
-            @PathVariable String processDefinitionKey, @RequestBody TaskSubmitDto payload) {
+    @Operation(
+            summary = "Start New Process Instance",
+            description = "Initiates a new workflow process instance based on the definition key. " +
+                    "Accepts initial form data, maps it to process variables, and sets the 'initiator' variable."
+    )
+    @PostMapping("/process/{processDefinitionKey}/start")
+    public ResponseEntity<?> startProcess(
+            @PathVariable String processDefinitionKey,
+            @RequestBody TaskSubmitDto payload) {
         log.info("🏗️ START PROCESS: Initiating instance for definition=[{}]", processDefinitionKey);
         try {
             FormSchemaService.SubmissionResult
@@ -274,8 +331,14 @@ import java.util.Map;
     // =========================================================================
     // 3. HISTORY TIMELINE ENDPOINT
     // =========================================================================
-    @GetMapping("/process/{processInstanceId}/history") public ResponseEntity<?> getProcessHistory(
-            @PathVariable String processInstanceId) {
+    @Operation(
+            summary = "Get Process History Timeline",
+            description = "Fetches the full execution history of a process instance. \n" +
+                    "Filters out technical nodes (SequenceFlows, Gateways) to return a clean timeline of User Tasks and Events. " +
+                    "Includes 'formSubmissionId' for tasks where a form was submitted."
+    )
+    @GetMapping("/process/{processInstanceId}/history")
+    public ResponseEntity<?> getProcessHistory(@PathVariable String processInstanceId) {
         log.info("🕰️ HISTORY: Fetching timeline for process [{}]", processInstanceId);
 
         try {
@@ -351,6 +414,11 @@ import java.util.Map;
         }
     }
 
+    @Operation(
+            summary = "Get Process BPMN XML",
+            description = "Retrieves the raw BPMN 2.0 XML definition for a specific process instance. " +
+                    "Used by the frontend to render the workflow diagram."
+    )
     @GetMapping("/process/{processInstanceId}/xml")
     public ResponseEntity<?> getProcessXml(@PathVariable String processInstanceId) {
         log.info("📜 XML REQUEST: Fetching BPMN for process [{}]", processInstanceId);
@@ -377,6 +445,11 @@ import java.util.Map;
         }
     }
 
+    @Operation(
+            summary = "Get Diagram Highlights",
+            description = "Returns a list of 'completed' and 'active' Activity IDs. " +
+                    "Used by the frontend to color-code the BPMN diagram (Green for completed, Red for active)."
+    )
     @GetMapping("/process/{processInstanceId}/highlights")
     public ResponseEntity<?> getHighlights(@PathVariable String processInstanceId) {
         log.info("🎨 HIGHLIGHTS: Fetching active/completed nodes for process [{}]", processInstanceId);
