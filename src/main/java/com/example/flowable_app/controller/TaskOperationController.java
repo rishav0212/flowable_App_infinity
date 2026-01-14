@@ -370,6 +370,7 @@ public class TaskOperationController {
                 event.put("endTime", act.getEndTime());
                 event.put("status", act.getEndTime() != null ? "COMPLETED" : "ACTIVE");
 
+
                 if ("userTask".equals(act.getActivityType()) && act.getTaskId() != null) {
                     HistoricTaskInstance
                             task =
@@ -379,7 +380,7 @@ public class TaskOperationController {
                         event.put("taskId", task.getId());
                         event.put("taskName", task.getName());
                         event.put("formKey", task.getFormKey());
-
+                        event.put("completedBy", task.getAssignee());
                         List<HistoricVariableInstance>
                                 taskVariables =
                                 historyService.createHistoricVariableInstanceQuery().taskId(act.getTaskId()).list();
