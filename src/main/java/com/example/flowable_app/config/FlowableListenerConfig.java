@@ -22,7 +22,7 @@ public class FlowableListenerConfig implements EngineConfigurationConfigurer<Spr
         if (engineConfiguration.getEventListeners() == null) {
             engineConfiguration.setEventListeners(new ArrayList<>());
         }
-
+        engineConfiguration.getEventListeners().add(businessKeyEnforcer);
 // 2. Register Custom Validator
         ProcessValidatorFactory validatorFactory = new ProcessValidatorFactory();
         ProcessValidator processValidator = validatorFactory.createDefaultProcessValidator();
