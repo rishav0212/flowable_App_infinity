@@ -169,7 +169,7 @@ public class StorageController {
 
                 // 🟢 CHANGE HERE: Manually construct the PREVIEW URL
                 // This forces the "Gmail Attachment" style viewer
-                String previewUrl = "https://drive.google.com/file/d/" + fileId + "/preview";
+                String previewUrl = "https://drive.google.com/file/d/" + fileId + "/view";
 
                 log.info("↪️ REDIRECT: Office file detected [{}]. Redirecting to Preview Mode.", gFile.getName());
 
