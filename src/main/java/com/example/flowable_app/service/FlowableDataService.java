@@ -105,8 +105,8 @@ public class FlowableDataService {
             SqlAndBindings parsed = parseNamedParams(conditionSql, params);
 
             return dsl.update(resolveTable(tableRef))
-                    .set(jooqUpdates)
-                    .where(DSL.condition(parsed.sql, parsed.bindings))
+                            .set(jooqUpdates)
+                            .where(DSL.condition(parsed.sql, parsed.bindings))
                     .execute();
         } catch (Exception e) {
             log.error("update error on table [{}]: {}", tableRef, e.getMessage());

@@ -20,6 +20,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -142,14 +143,14 @@ public class StorageController {
      * Proxies a file download from Google Drive.
      */
     @Operation(
-            summary = "Stream file content",
-            description = "Proxies the file stream from Google Drive to the client. This allows viewing private Drive files without exposing credentials."
+            summary = "View or Stream file content",
+            description = "Smart endpoint: Redirects to Google Viewer for Office files and streams PDF/Images directly."
     )
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "File stream retrieved successfully",
-                    content = @Content(schema = @Schema(type = "string", format = "binary"))),
+            @ApiResponse(responseCode = "200", description = "File stream retrieved successfully (Images/PDF)"),
+            @ApiResponse(responseCode = "302", description = "Redirected to Google Drive Viewer (Excel/Word)"),
             @ApiResponse(responseCode = "404", description = "File ID not found"),
-            @ApiResponse(responseCode = "500", description = "Failed to retrieve file stream")
+            @ApiResponse(responseCode = "500", description = "Failed to process request")
     })
     @GetMapping("/proxy/{fileId}")
     public ResponseEntity<?> viewFile(
@@ -159,31 +160,48 @@ public class StorageController {
         log.debug("📥 PROXY REQUEST: Fetching content for File ID [{}]", fileId);
 
         try {
-            // Fetch metadata
+            // 1. Fetch metadata
             com.google.api.services.drive.model.File gFile = googleDriveService.getFileMetadata(fileId);
+            String mimeType = gFile.getMimeType();
 
-            // Fetch actual content stream
+            // 2. LOGIC SWITCH: Check if it's an Office file (Excel, Word, PPT)
+            if (isOfficeFile(mimeType)) {
+
+                // 🟢 CHANGE HERE: Manually construct the PREVIEW URL
+                // This forces the "Gmail Attachment" style viewer
+                String previewUrl = "https://drive.google.com/file/d/" + fileId + "/preview";
+
+                log.info("↪️ REDIRECT: Office file detected [{}]. Redirecting to Preview Mode.", gFile.getName());
+
+                return ResponseEntity.status(HttpStatus.FOUND) // 302 Redirect
+                        .location(URI.create(previewUrl))
+                        .build();
+            }
+
+            // 3. STREAMING LOGIC: For Images, PDFs, Text (Keep this as is)
+            log.info("✅ PROXY STREAM: Streaming file [{}], Type [{}]", gFile.getName(), mimeType);
             InputStreamResource resource = new InputStreamResource(googleDriveService.downloadFile(fileId));
 
-            log.info("✅ PROXY SUCCESS: Serving file [{}], Type [{}]", gFile.getName(), gFile.getMimeType());
-
             return ResponseEntity.ok()
-                    .contentType(MediaType.parseMediaType(gFile.getMimeType()))
+                    .contentType(MediaType.parseMediaType(mimeType))
                     .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + gFile.getName() + "\"")
                     .body(resource);
 
-        } catch (GoogleJsonResponseException e) {
-            log.warn("⚠️ PROXY GOOGLE ERROR: Code [{}], Details [{}]", e.getStatusCode(),
-                    (e.getDetails() != null ? e.getDetails().getMessage() : "No details"));
-
-            if (e.getStatusCode() == 404) {
-                return ResponseEntity.notFound().build();
-            }
-            return ResponseEntity.status(e.getStatusCode()).body("Drive Error: " + e.getDetails().getMessage());
-
         } catch (Exception e) {
-            log.error("❌ PROXY FAILED: Internal error for File ID [{}]. Reason: {}", fileId, e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to retrieve file.");
+            log.error("❌ PROXY FAILED: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error: " + e.getMessage());
         }
+    }
+    /**
+     * Helper to detect files that browsers cannot render natively.
+     */
+    private boolean isOfficeFile(String mimeType) {
+        if (mimeType == null) return false;
+        return mimeType.contains("excel") ||       // .xlsx, .xls
+                mimeType.contains("spreadsheet") || // Google Sheets
+                mimeType.contains("word") ||        // .docx, .doc
+                mimeType.contains("document") ||    // Google Docs
+                mimeType.contains("presentation") || // .pptx
+                mimeType.contains("powerpoint");
     }
 }

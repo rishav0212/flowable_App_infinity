@@ -82,7 +82,7 @@ public class GoogleDriveService {
         }
 
         // Scope: grants access to files created or opened by the app
-        credentials = credentials.createScoped(Collections.singleton(DriveScopes.DRIVE_FILE));
+        credentials = credentials.createScoped(Collections.singleton(DriveScopes.DRIVE));
 
         return new Drive.Builder(new NetHttpTransport(),
                 GsonFactory.getDefaultInstance(),
@@ -128,6 +128,8 @@ public class GoogleDriveService {
         return file.getId();
     }
 
+
+
     /**
      * Downloads a file stream from Google Drive.
      *
@@ -138,7 +140,7 @@ public class GoogleDriveService {
     public InputStream downloadFile(String fileId) throws IOException {
         log.debug("📥 START: Downloading stream for File ID [{}]", fileId);
         Drive service = getDriveService();
-        return service.files().get(fileId).executeMediaAsInputStream();
+        return service.files().get(fileId).setSupportsAllDrives(true).executeMediaAsInputStream();
     }
 
     /**
@@ -154,7 +156,8 @@ public class GoogleDriveService {
 
         File file = service.files()
                 .get(fileId)
-                .setFields("id, name, mimeType, size")
+                // ✅ IMPORTANT: 'webViewLink' MUST be in this string
+                .setFields("id, name, mimeType, size, webViewLink")
                 .setSupportsAllDrives(true)
                 .execute();
 
