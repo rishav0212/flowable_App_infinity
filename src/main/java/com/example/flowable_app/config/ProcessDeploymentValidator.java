@@ -164,17 +164,35 @@ public class ProcessDeploymentValidator extends ProcessLevelValidator {
             boolean validSignatureFound = false;
             StringBuilder typeMismatchMsg = new StringBuilder();
 
+// Inside the checkExpr method, where you loop through expectedTypes
             for (Class<?>[] expectedTypes : methodSignatures.get(fullKey)) {
+
+                boolean isVarargs = expectedTypes.length > 0 && expectedTypes[expectedTypes.length - 1].isArray();
+
                 // 1. Check Count
-                if (expectedTypes.length != argCount) continue;
+                if (isVarargs) {
+                    // For varargs, we just need at least (length - 1) arguments
+                    if (argCount < expectedTypes.length - 1) continue;
+                } else {
+                    // Standard method: counts must match exactly
+                    if (expectedTypes.length != argCount) continue;
+                }
 
                 // 2. Check Types
                 boolean typesMatch = true;
                 for (int i = 0; i < argCount; i++) {
-                    if (!isTypeCompatible(argList.get(i), expectedTypes[i])) {
+                    // Determine which type to check against
+                    Class<?> typeToCheck;
+                    if (isVarargs && i >= expectedTypes.length - 1) {
+                        // Get the component type of the array (e.g., Object from Object[])
+                        typeToCheck = expectedTypes[expectedTypes.length - 1].getComponentType();
+                    } else {
+                        typeToCheck = expectedTypes[i];
+                    }
+
+                    if (!isTypeCompatible(argList.get(i), typeToCheck)) {
                         typesMatch = false;
-                        typeMismatchMsg.append(String.format("Arg %d: '%s' is not compatible with %s. ",
-                                i + 1, argList.get(i), expectedTypes[i].getSimpleName()));
+                        // ... build mismatch message ...
                         break;
                     }
                 }
@@ -184,6 +202,7 @@ public class ProcessDeploymentValidator extends ProcessLevelValidator {
                     break;
                 }
             }
+
 
             if (!validSignatureFound) {
                 if (typeMismatchMsg.length() > 0) {
