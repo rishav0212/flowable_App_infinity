@@ -150,14 +150,29 @@ public class FlowableDataService {
         if (inputName == null || inputName.trim().isEmpty()) {
             throw new FlowableIllegalArgumentException("Table name cannot be empty");
         }
+
+        String normalized = inputName.trim().toUpperCase();
+
+        // 🚫 Block Flowable / system tables
+        for (String prefix : SYSTEM_TABLE_PREFIXES) {
+            if (normalized.startsWith(prefix)) {
+                throw new FlowableIllegalArgumentException(
+                        "Access to system table '" + inputName + "' is forbidden"
+                );
+            }
+        }
+
+        // Handle schema-qualified tables (schema.table)
         if (inputName.contains(".")) {
             String[] parts = inputName.split("\\.");
             if (parts.length == 2) {
                 return DSL.table(DSL.name(parts[0], parts[1]));
             }
         }
+
         return DSL.table(DSL.name(inputName));
     }
+
 
     private SqlAndBindings parseNamedParams(String sql, Map<String, Object> params) {
         if (params == null || params.isEmpty() || sql == null) {
@@ -192,4 +207,11 @@ public class FlowableDataService {
             this.bindings = bindings;
         }
     }
+
+    // Flowable / engine internal tables — NEVER accessible from low-code DSL
+    private static final String[] SYSTEM_TABLE_PREFIXES = {
+            "ACT_",
+            "FLW_"
+    };
+
 }

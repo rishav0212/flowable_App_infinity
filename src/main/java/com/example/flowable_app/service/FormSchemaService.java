@@ -12,7 +12,6 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -47,37 +46,30 @@ public class FormSchemaService {
         }
 
         // 4. MIRROR TO SQL (If "sql" tag exists)
+// ... inside processSubmission method ...
+
+        // 4. MIRROR TO SQL (If "sql" tag exists)
         if (hasSqlTag(formSchema)) {
             log.info("🏷️ SQL tag detected. Starting SQL mirroring process...");
 
-            // 🔍 FIND CONFIGURATION
             JsonNode componentNode = objectMapper.valueToTree(formSchema.get("components"));
             Map<String, Object> buttonProps = findSubmitButtonProperties(componentNode);
 
             String targetTable = (String) buttonProps.get("targetTable");
-            String upsertPath = (String) buttonProps.get("upsertKey");
 
             if (targetTable != null) {
-                log.info("📝 SQL Config found: Table=[{}], UpsertKeyPath=[{}]", targetTable, upsertPath);
-
-                String recordId = (upsertPath != null) ? extractValueByPath(userFormData, upsertPath) : null;
-
-                if (recordId == null || recordId.isEmpty()) {
-                    recordId = UUID.randomUUID().toString();
-                    log.info("✨ No existing ID found at path [{}]. Generated new UUID: [{}]", upsertPath, recordId);
-                } else {
-                    log.info("🔗 Found existing ID for upsert: [{}]", recordId);
-                }
+                // 🟢 NEW LOGIC: Build the Identifiers Map
+                Map<String, Object> identifiers = extractIdentifiers(buttonProps, userFormData);
 
                 try {
-                    dataMirrorService.mirrorDataToTable(targetTable, recordId, userFormData);
+                    // 🟢 CALL UPDATED SERVICE
+                    dataMirrorService.mirrorDataToTable(targetTable, identifiers, userFormData);
                     log.info("🪞 SQL Mirroring completed for table [{}]", targetTable);
                 } catch (Exception e) {
                     log.error("❌ SQL Mirroring failed: {}", e.getMessage());
                 }
             } else {
-                log.warn(
-                        "⚠️ SQL Tag found, but no 'targetTable' property was found on the 'submit' button. Skipping SQL.");
+                log.warn("⚠️ SQL Tag found, but no 'targetTable' property found.");
             }
         } else {
             log.debug("ℹ️ No SQL tag found for form [{}]. Skipping mirror.", targetFormKey);
@@ -104,7 +96,7 @@ public class FormSchemaService {
                 .build();
     }
 
-    private Map<String, Object> findSubmitButtonProperties(JsonNode components) {
+    public Map<String, Object> findSubmitButtonProperties(JsonNode components) {
         if (components == null || !components.isArray()) return new HashMap<>();
         for (JsonNode comp : components) {
             if (comp.has("key") && "submit".equalsIgnoreCase(comp.get("key").asText())) {
@@ -131,6 +123,41 @@ public class FormSchemaService {
 
     // Helper methods remain exactly as provided in your prompt,
     // but ensured they align with the logic above.
+
+    public Map<String, Object> extractIdentifiers(Map<String, Object> buttonProps, Map<String, Object> data) {
+        Map<String, Object> identifiers = new HashMap<>();
+
+        // Strategy A: Clean Properties (upsertKey.colName = jsonPath)
+        buttonProps.forEach((key, value) -> {
+            if (key.startsWith("upsertKey.") && value instanceof String) {
+                String colName = key.substring("upsertKey.".length());
+                String jsonPath = ((String) value).trim();
+                String val = extractValueByPath(data, jsonPath);
+                if (val != null) identifiers.put(colName, val);
+            }
+        });
+
+//        // Strategy B: Legacy String (upsertKeys = "path:col, path:col")
+//        if (identifiers.isEmpty() && buttonProps.containsKey("upsertKeys")) {
+//            String rawConfig = (String) buttonProps.get("upsertKeys");
+//            for (String def : rawConfig.split(",")) {
+//                String[] parts = def.split(":");
+//                String path = parts[0].trim();
+//                String col = (parts.length > 1) ? parts[1].trim() : path.substring(path.lastIndexOf(".") + 1);
+//                String val = extractValueByPath(data, path);
+//                if (val != null) identifiers.put(col, val);
+//            }
+//        }
+//
+//        // Strategy C: Single Key Legacy
+//        if (identifiers.isEmpty() && buttonProps.containsKey("upsertKey")) {
+//            String path = (String) buttonProps.get("upsertKey");
+//            String val = extractValueByPath(data, path);
+//            if (val != null) identifiers.put("id", val);
+//        }
+
+        return identifiers;
+    }
 
     public boolean hasSqlTag(Map<String, Object> formDef) {
         if (formDef == null || !formDef.containsKey("tags")) return false;

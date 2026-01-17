@@ -23,9 +23,12 @@ public class DataMirrorService {
     /**
      * 🟢 SAVE: Takes Form.io JSON data and inserts/updates it in MySQL
      */
+    /**
+     * 🟢 SAVE: Checks if row exists based on 'identifiers' map, then Inserts or Updates.
+     */
     @Transactional
-    public void mirrorDataToTable(String targetTableName, String recordId, Map<String, Object> data) {
-        log.info("🪞 SQL MIRROR: Starting sync for table [{}] | ID: [{}]", targetTableName, recordId);
+    public void mirrorDataToTable(String targetTableName, Map<String, Object> identifiers, Map<String, Object> data) {
+        log.info("🪞 SQL MIRROR: Syncing table [{}] | Keys: {}", targetTableName, identifiers);
 
         try {
             // 1. Sanitize Table Name
@@ -33,8 +36,7 @@ public class DataMirrorService {
                     ? targetTableName
                     : "tbl_" + targetTableName.toLowerCase().replaceAll("[^a-z0-9_]", "");
 
-            // 2. Fetch Schema (Updated for MySQL: using data_type column)
-            log.debug("🔍 SCHEMA: Fetching column types for table [{}]", tableName);
+            // 2. Fetch Schema
             Map<String, String> columnTypes = dsl.select(
                             DSL.field("column_name", String.class),
                             DSL.field("data_type", String.class)
@@ -48,79 +50,80 @@ public class DataMirrorService {
                     );
 
             if (columnTypes.isEmpty()) {
-                log.warn("⚠️ MIRROR ABORTED: Table [{}] does not exist in MySQL schema.", tableName);
+                log.warn("⚠️ MIRROR ABORTED: Table [{}] does not exist.", tableName);
                 return;
             }
 
-            Map<Field<?>, Object> insertData = new HashMap<>();
-            Map<Field<?>, Object> updateData = new HashMap<>();
+            // 3. Prepare Data for Write
+            Map<Field<?>, Object> writeData = new HashMap<>();
 
-            // 3. Handle ID mapping
-            if (columnTypes.containsKey("id")) {
-                insertData.put(DSL.field(DSL.name("id")), recordId);
-            } else {
-                log.error("❌ MIRROR FAILED: Target table [{}] is missing 'id' primary key column.", tableName);
-                return;
-            }
+            // Merge identifiers into payload so they are included in the INSERT
+            Map<String, Object> finalData = new HashMap<>(data);
+            identifiers.forEach(finalData::putIfAbsent);
 
-            // 4. Process and Log Payload Mapping
-            log.debug("📦 DATA: Mapping {} input fields to SQL columns...", data.size());
-            for (Map.Entry<String, Object> entry : data.entrySet()) {
-                String rawKey = entry.getKey();
-                if ("id".equalsIgnoreCase(rawKey)) continue;
-
-                String colName = rawKey.toLowerCase().replaceAll("[^a-z0-9_]", "");
+            for (Map.Entry<String, Object> entry : finalData.entrySet()) {
+                String colName = entry.getKey().toLowerCase().replaceAll("[^a-z0-9_]", "");
 
                 if (columnTypes.containsKey(colName)) {
                     Object value = entry.getValue();
                     String dbType = columnTypes.get(colName);
                     Field<Object> field = DSL.field(DSL.name(colName));
 
-                    // Handle JSON (MySQL uses 'json' type)
-                    if ("json".equalsIgnoreCase(dbType)) {
+                    if ("json".equalsIgnoreCase(dbType) && (value instanceof Map || value instanceof List)) {
                         try {
-                            if (value instanceof Map || value instanceof List) {
-                                value = JSON.valueOf(objectMapper.writeValueAsString(value));
-                            } else if (value instanceof String) {
-                                value = JSON.valueOf((String) value);
-                            }
+                            value = objectMapper.writeValueAsString(value);
                         } catch (Exception e) {
-                            log.warn("⚠️ JSON CONVERSION: Failed for column [{}], saving as NULL.", colName);
-                            value = null;
                         }
                     } else if (value instanceof Map || value instanceof List) {
                         value = value.toString();
                     }
-
-                    insertData.put(field, value);
-                    updateData.put(field, value);
+                    writeData.put(field, value);
                 }
             }
 
-            // 5. Build and Log the UPSERT Logic (Fixed for MySQL using onConflict emulation)
-            log.info("🔨 DATABASE ACTION: Executing Upsert on [{}] for ID [{}]", tableName, recordId);
+            // 4. CHECK EXISTENCE (Build Dynamic WHERE clause)
+            Condition matchCondition = DSL.noCondition();
+            boolean validKeyFound = false;
 
-            var insertStep = dsl.insertInto(DSL.table(DSL.name(tableName)))
-                    .set(insertData);
-
-            if (updateData.isEmpty()) {
-                log.info("➡️ UPSERT MODE: [Insert Only] No matching data columns found.");
-                // This emulates 'INSERT IGNORE' in MySQL
-                insertStep.onConflictDoNothing().execute();
-            } else {
-                log.info("➡️ UPSERT MODE: [Insert or Update] Mapping {} data columns to update set.",
-                        updateData.size());
-                // This emulates 'ON DUPLICATE KEY UPDATE' in MySQL
-                insertStep.onConflict(DSL.field(DSL.name("id")))
-                        .doUpdate()
-                        .set(updateData)
-                        .execute();
+            for (Map.Entry<String, Object> idEntry : identifiers.entrySet()) {
+                String col = idEntry.getKey().toLowerCase();
+                if (columnTypes.containsKey(col)) {
+                    matchCondition = matchCondition.and(DSL.field(DSL.name(col)).eq(idEntry.getValue()));
+                    validKeyFound = true;
+                }
             }
 
-            log.info("✅ MIRROR SUCCESS: Table [{}] synchronized for PK [{}]", tableName, recordId);
+            if (!validKeyFound) {
+                log.error("❌ MIRROR FAILED: No valid identifier columns found for table [{}].", tableName);
+                return;
+            }
+
+            boolean exists = dsl.fetchExists(
+                    dsl.selectOne().from(DSL.table(DSL.name(tableName))).where(matchCondition)
+            );
+
+            // 5. EXECUTE
+            if (exists) {
+                log.info("🔄 MATCH FOUND: Updating record...");
+                dsl.update(DSL.table(DSL.name(tableName)))
+                        .set(writeData)
+                        .where(matchCondition)
+                        .execute();
+            } else {
+                log.info("✨ NO MATCH: Inserting new record...");
+                // Auto-generate UUID for 'id' if required and missing
+                if (columnTypes.containsKey("id") && !writeData.containsKey(DSL.field(DSL.name("id")))) {
+                    writeData.put(DSL.field(DSL.name("id")), UUID.randomUUID().toString());
+                }
+                dsl.insertInto(DSL.table(DSL.name(tableName)))
+                        .set(writeData)
+                        .execute();
+            }
+            log.info("✅ SYNC COMPLETE for table [{}]", tableName);
 
         } catch (Exception e) {
-            log.error("❌ MIRROR CRASH: Failed to sync table [{}]. Reason: {}", targetTableName, e.getMessage());
+            log.error("❌ MIRROR CRASH: {}", e.getMessage(), e);
+            throw new RuntimeException("SQL Mirroring Failed", e);
         }
     }
 

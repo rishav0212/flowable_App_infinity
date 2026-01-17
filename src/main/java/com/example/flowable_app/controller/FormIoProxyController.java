@@ -3,8 +3,10 @@ package com.example.flowable_app.controller;
 import com.example.flowable_app.client.FormIoClient;
 import com.example.flowable_app.service.DataMirrorService;
 import com.example.flowable_app.service.FormIoAuthService;
+import com.example.flowable_app.service.FormSchemaService;
 import com.example.flowable_app.service.SchemaSyncService;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +39,8 @@ public class FormIoProxyController {
     private final FormIoClient formIoClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    private final FormSchemaService formSchemaService;
+
     // Regex: Matches .../form/{formId}/submission
     private final Pattern SUBMISSION_PATTERN = Pattern.compile(".*/form/([^/]+)/submission");
 
@@ -46,11 +50,13 @@ public class FormIoProxyController {
     public FormIoProxyController(FormIoAuthService authService,
                                  SchemaSyncService schemaSyncService,
                                  DataMirrorService dataMirrorService,
-                                 FormIoClient formIoClient) {
+                                 FormIoClient formIoClient,
+                                 FormSchemaService formSchemaService) {
         this.authService = authService;
         this.schemaSyncService = schemaSyncService;
         this.dataMirrorService = dataMirrorService;
         this.formIoClient = formIoClient;
+        this.formSchemaService = formSchemaService;
     }
 
     @RequestMapping(value = "/**",
@@ -147,17 +153,26 @@ public class FormIoProxyController {
                             if (hasSqlTag(formDef)) {
                                 String formPath = (String) formDef.get("path");
 
-                                // B. Parse Response
-                                Map<String, Object>
-                                        submission =
-                                        objectMapper.readValue(responseBody, new TypeReference<>() {
-                                        });
-                                String submissionId = (String) submission.get("_id");
+                                // B. Parse Submission Data
+                                Map<String, Object> submission = objectMapper.readValue(responseBody, new TypeReference<>() {});
                                 Map<String, Object> data = (Map<String, Object>) submission.get("data");
+                                String submissionId = (String) submission.get("_id");
 
-                                // C. Insert into SQL
-                                log.info("🪞 MIRRORING: Writing submission {} to 'tbl_{}'", submissionId, formPath);
-                                dataMirrorService.mirrorDataToTable(formPath, submissionId, data);
+                                // C. Extract Keys (UPDATED LOGIC)
+                                JsonNode componentNode = objectMapper.valueToTree(formDef.get("components"));
+                                Map<String, Object> buttonProps = formSchemaService.findSubmitButtonProperties(componentNode);
+
+                                Map<String, Object> identifiers = formSchemaService.extractIdentifiers(buttonProps, data);
+
+                                // Fallback: If no keys configured, use Form.io _id -> id
+                                if (identifiers.isEmpty()) {
+                                    identifiers.put("id", submissionId);
+                                    data.put("id", submissionId);
+                                }
+
+                                // D. Call Updated Service
+                                log.info("🪞 MIRRORING: Writing to 'tbl_{}' | Keys: {}", formPath, identifiers);
+                                dataMirrorService.mirrorDataToTable(formPath, identifiers, data);
                             }
                         } catch (Exception e) {
                             log.error("❌ ASYNC MIRROR FAILED: {}", e.getMessage());
