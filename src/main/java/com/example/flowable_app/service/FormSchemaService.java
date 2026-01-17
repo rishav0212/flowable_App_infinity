@@ -45,8 +45,7 @@ public class FormSchemaService {
             throw new RuntimeException("Form.io Save Failed", e);
         }
 
-        // 4. MIRROR TO SQL (If "sql" tag exists)
-// ... inside processSubmission method ...
+
 
         // 4. MIRROR TO SQL (If "sql" tag exists)
         if (hasSqlTag(formSchema)) {
@@ -61,6 +60,11 @@ public class FormSchemaService {
                 // 🟢 NEW LOGIC: Build the Identifiers Map
                 Map<String, Object> identifiers = extractIdentifiers(buttonProps, userFormData);
 
+                if (identifiers.isEmpty()) {
+                    log.info("⚠️ No custom upsert keys found. Falling back to Submission ID: {}", submissionId);
+                    identifiers.put("id", submissionId);
+                    userFormData.put("id", submissionId); // Ensure it's in the data payload for INSERT
+                }
                 try {
                     // 🟢 CALL UPDATED SERVICE
                     dataMirrorService.mirrorDataToTable(targetTable, identifiers, userFormData);
