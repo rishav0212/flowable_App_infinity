@@ -21,7 +21,6 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -148,52 +147,27 @@ public class FormIoProxyController {
                                 String submissionId = (String) submission.get("_id");
 
                                 // C. Get Config
+// C. Get Config
                                 JsonNode componentNode = objectMapper.valueToTree(formDef.get("components"));
                                 Map<String, Object>
                                         buttonProps =
                                         formSchemaService.findSubmitButtonProperties(componentNode);
 
-                                // 🟢 STRICT STRATEGY: ONLY "writeTargets"
+                                // 🟢 CLEANER: Use the Service Logic!
                                 if (buttonProps.containsKey("writeTargets")) {
-                                    String jsonConfig = (String) buttonProps.get("writeTargets");
+
+                                    // 1. Delegate the complex parsing to the service
                                     List<Map<String, Object>>
-                                            targets =
-                                            objectMapper.readValue(jsonConfig, new TypeReference<>() {
-                                            });
-                                    List<Map<String, Object>> batchPayload = new ArrayList<>();
+                                            batchPayload =
+                                            formSchemaService.buildBatchPayload(buttonProps, data, submissionId);
 
-                                    for (Map<String, Object> target : targets) {
-                                        String tableName = (String) target.get("table");
-                                        Map<String, String> keyConfig = (Map<String, String>) target.get("keys");
-
-                                        // Extract Keys
-                                        Map<String, Object> identifiers = new HashMap<>();
-                                        if (keyConfig != null) {
-                                            keyConfig.forEach((colName, jsonPath) -> {
-                                                String val = formSchemaService.extractValueByPath(data, jsonPath);
-                                                if (val != null) identifiers.put(colName, val);
-                                            });
-                                        }
-
-                                        // Fallback: If specific keys missing, use Submission ID
-                                        if (identifiers.isEmpty()) {
-                                            identifiers.put("id", submissionId);
-                                            data.put("id", submissionId);
-                                        }
-
-                                        Map<String, Object> operation = new HashMap<>();
-                                        operation.put("table", tableName);
-                                        operation.put("keys", identifiers);
-                                        operation.put("data", data);
-                                        batchPayload.add(operation);
+                                    // 2. Execute
+                                    if (!batchPayload.isEmpty()) {
+                                        log.info("🪞 MIRRORING: Batch write to {} targets.", batchPayload.size());
+                                        dataMirrorService.mirrorBatch(batchPayload);
                                     }
-
-                                    log.info("🪞 MIRRORING: Batch write to {} targets.", batchPayload.size());
-                                    dataMirrorService.mirrorBatch(batchPayload);
                                 } else {
-                                    // ❌ ERROR: Tag exists, but no config
-                                    log.error(
-                                            "❌ MIRROR SKIPPED: Form '{}' has 'sql' tag but MISSING 'writeTargets' property on Submit button.",
+                                    log.error("❌ MIRROR SKIPPED: Form '{}' has 'sql' tag but MISSING 'writeTargets'.",
                                             formPath);
                                 }
                             }

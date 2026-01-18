@@ -55,68 +55,13 @@ public class FormSchemaService {
             JsonNode componentNode = objectMapper.valueToTree(formSchema.get("components"));
             Map<String, Object> buttonProps = findSubmitButtonProperties(componentNode);
 
-            // 🟢 STRATEGY 1: "writeTargets" (Batch Update)
+            // 🟢 STRATEGY 1: "sqlConfig" (Batch Update)
             if (buttonProps.containsKey("writeTargets")) {
-                try {
-                    String jsonConfig = (String) buttonProps.get("writeTargets");
+                // Reuse the same method!
+                List<Map<String, Object>> batchPayload = buildBatchPayload(buttonProps, userFormData, submissionId);
 
-                    // Parse Config: [{"table": "infinity.orders", "keys": {"col":"path"}}, ...]
-                    List<Map<String, Object>> targets = objectMapper.readValue(jsonConfig, new TypeReference<>() {
-                    });
-                    List<Map<String, Object>> batchPayload = new ArrayList<>();
-
-                    for (Map<String, Object> target : targets) {
-                        String tableName = (String) target.get("table");
-                        Map<String, String> keyConfig = (Map<String, String>) target.get("keys");
-
-                        // Extract identifiers for THIS specific table
-                        Map<String, Object> identifiers = new HashMap<>();
-                        if (keyConfig != null) {
-                            keyConfig.forEach((colName, jsonPath) -> {
-                                String val = extractValueByPath(userFormData, jsonPath);
-                                if (val != null) identifiers.put(colName, val);
-                            });
-                        }
-
-                        // Fallback: If no keys found, use Submission ID
-                        if (identifiers.isEmpty()) {
-                            identifiers.put("id", submissionId);
-                            userFormData.put("id", submissionId);
-                        }
-
-                        // Add to Batch List
-                        Map<String, Object> operation = new HashMap<>();
-                        operation.put("table", tableName);
-                        operation.put("keys", identifiers);
-                        operation.put("data", userFormData);
-
-                        batchPayload.add(operation);
-                    }
-
-                    // Execute Batch
-                    if (!batchPayload.isEmpty()) {
-                        dataMirrorService.mirrorBatch(batchPayload);
-                    }
-
-                } catch (Exception e) {
-                    log.error("❌ Failed to process 'writeTargets': {}", e.getMessage());
-                }
-            }
-            // 🔙 STRATEGY 2: Legacy "targetTable" (Single Table)
-            else if (buttonProps.containsKey("targetTable")) {
-                String targetTable = (String) buttonProps.get("targetTable");
-                Map<String, Object> identifiers = extractIdentifiers(buttonProps, userFormData);
-
-                if (identifiers.isEmpty()) {
-                    identifiers.put("id", submissionId);
-                    userFormData.put("id", submissionId);
-                }
-
-                try {
-                    dataMirrorService.mirrorDataToTable(targetTable, identifiers, userFormData);
-                    log.info("🪞 SQL Mirroring completed for table [{}]", targetTable);
-                } catch (Exception e) {
-                    log.error("❌ SQL Mirroring failed: {}", e.getMessage());
+                if (!batchPayload.isEmpty()) {
+                    dataMirrorService.mirrorBatch(batchPayload);
                 }
             }
         }
@@ -170,39 +115,50 @@ public class FormSchemaService {
     // Helper methods remain exactly as provided in your prompt,
     // but ensured they align with the logic above.
 
-    public Map<String, Object> extractIdentifiers(Map<String, Object> buttonProps, Map<String, Object> data) {
-        Map<String, Object> identifiers = new HashMap<>();
+    /**
+     * 🟢 SHARED LOGIC: Parses 'sqlConfig', extracts keys, and builds the batch payload.
+     * Use this in both processSubmission (Service) and proxyRequest (Controller).
+     */
+    public List<Map<String, Object>> buildBatchPayload(Map<String, Object> buttonProps, Map<String, Object> data, String submissionId) {
+        List<Map<String, Object>> batchPayload = new ArrayList<>();
 
-        // Strategy A: Clean Properties (upsertKey.colName = jsonPath)
-        buttonProps.forEach((key, value) -> {
-            if (key.startsWith("upsertKey.") && value instanceof String) {
-                String colName = key.substring("upsertKey.".length());
-                String jsonPath = ((String) value).trim();
-                String val = extractValueByPath(data, jsonPath);
-                if (val != null) identifiers.put(colName, val);
+        if (buttonProps.containsKey("sqlConfig")) {
+            try {
+                String jsonConfig = (String) buttonProps.get("sqlConfig");
+                List<Map<String, Object>> targets = objectMapper.readValue(jsonConfig, new TypeReference<>() {
+                });
+
+                for (Map<String, Object> target : targets) {
+                    String tableName = (String) target.get("table");
+                    Map<String, String> keyConfig = (Map<String, String>) target.get("keys");
+
+                    // Extract identifiers
+                    Map<String, Object> identifiers = new HashMap<>();
+                    if (keyConfig != null) {
+                        keyConfig.forEach((colName, jsonPath) -> {
+                            String val = extractValueByPath(data, jsonPath);
+                            if (val != null) identifiers.put(colName, val);
+                        });
+                    }
+
+                    // Fallback
+                    if (identifiers.isEmpty()) {
+                        identifiers.put("id", submissionId);
+                        data.put("id", submissionId);
+                    }
+
+                    Map<String, Object> operation = new HashMap<>();
+                    operation.put("table", tableName);
+                    operation.put("keys", identifiers);
+                    operation.put("data", data);
+
+                    batchPayload.add(operation);
+                }
+            } catch (Exception e) {
+                log.error("❌ Failed to build batch payload: {}", e.getMessage());
             }
-        });
-
-//        // Strategy B: Legacy String (upsertKeys = "path:col, path:col")
-//        if (identifiers.isEmpty() && buttonProps.containsKey("upsertKeys")) {
-//            String rawConfig = (String) buttonProps.get("upsertKeys");
-//            for (String def : rawConfig.split(",")) {
-//                String[] parts = def.split(":");
-//                String path = parts[0].trim();
-//                String col = (parts.length > 1) ? parts[1].trim() : path.substring(path.lastIndexOf(".") + 1);
-//                String val = extractValueByPath(data, path);
-//                if (val != null) identifiers.put(col, val);
-//            }
-//        }
-//
-//        // Strategy C: Single Key Legacy
-//        if (identifiers.isEmpty() && buttonProps.containsKey("upsertKey")) {
-//            String path = (String) buttonProps.get("upsertKey");
-//            String val = extractValueByPath(data, path);
-//            if (val != null) identifiers.put("id", val);
-//        }
-
-        return identifiers;
+        }
+        return batchPayload;
     }
 
     public boolean hasSqlTag(Map<String, Object> formDef) {
