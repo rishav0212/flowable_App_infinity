@@ -171,13 +171,6 @@ public class DataMirrorService {
             tableName = parts[1];
         }
 
-        // Sanitize table name (if coming from raw input)
-        if (!tableName.startsWith("tbl_") && !targetTableName.contains(".")) {
-            // Optional: Force prefix if you stick to that convention,
-            // but for generic generic fetching, usually better to leave it raw or handle logic here.
-            // tableName = "tbl_" + tableName;
-        }
-
         log.info("🌐 SQL FETCH: Querying [{}.{}]", (schemaName != null ? schemaName : "DEFAULT"), tableName);
 
         // 2. Build Query
@@ -252,33 +245,51 @@ public class DataMirrorService {
                 : null;
 
         List<Map<String, Object>> submissions = new ArrayList<>();
+
         for (Record record : records) {
             Map<String, Object> submission = new HashMap<>();
             Map<String, Object> data = new HashMap<>();
 
-            String pk = record.get("id", String.class);
-            submission.put("id", pk);
-            submission.put("_id", pk);
-            submission.put("created", record.get("created_at"));
+            // 🛡️ SAFE ID FETCH: Check existence before getting
+            String pk = null;
+            if (record.field("id") != null) pk = record.get("id", String.class);
+            else if (record.field("ID") != null) pk = record.get("ID", String.class);
 
-            data.put("id", pk);
+            if (pk != null) {
+                submission.put("id", pk);
+                submission.put("_id", pk);
+                data.put("id", pk);
+            }
 
+            // 🛡️ SAFE CREATED FETCH
+            if (record.field("created_at") != null) submission.put("created", record.get("created_at"));
+            else if (record.field("created") != null) submission.put("created", record.get("created"));
+
+            // Map all other columns
             for (org.jooq.Field<?> field : record.fields()) {
                 String name = field.getName();
-                if (List.of("id", "submission_id", "created_at").contains(name)) continue;
 
-                if (allowedFields == null || allowedFields.contains(name)) {
+                // Skip internal fields if we already handled them
+                if (List.of("id", "submission_id", "created_at").contains(name.toLowerCase())) continue;
+
+                if (allowedFields == null || allowedFields.contains(name.toLowerCase())) {
                     Object value = record.get(field);
 
-                    // MySQL returns org.jooq.JSON instead of JSONB
+                    // MySQL JSON Handling
                     if (value instanceof org.jooq.JSON) {
                         try {
                             value = objectMapper.readValue(((org.jooq.JSON) value).data(), Object.class);
                         } catch (Exception e) {
-                            log.error("❌ JSON DESERIALIZE FAILED for [{}]: {}", name, e.getMessage());
                             value = ((org.jooq.JSON) value).data();
                         }
+                    } else if (value instanceof org.jooq.JSONB) {
+                        try {
+                            value = objectMapper.readValue(((org.jooq.JSONB) value).data(), Object.class);
+                        } catch (Exception e) {
+                            value = ((org.jooq.JSONB) value).data();
+                        }
                     }
+
                     data.put(name, value);
                 }
             }
