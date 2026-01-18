@@ -58,6 +58,34 @@ public class FormIoProxyController {
         this.formSchemaService = formSchemaService;
     }
 
+    // =================================================================
+    // 🟢 1. GENERIC SQL ENDPOINT (For Select Components)
+    // URL: /api/forms/sql-data?table=infinity.tbl_clients&city=Delhi
+    // =================================================================
+    @RequestMapping(value = "/sql-data", method = RequestMethod.GET)
+    public ResponseEntity<List<Map<String, Object>>> getSqlData(HttpServletRequest request) {
+        String tableName = request.getParameter("table");
+
+        if (tableName == null || tableName.isEmpty()) {
+            return ResponseEntity.badRequest().body(null);
+        }
+
+        // Convert request params to Map
+        Map<String, String> queryParams = new HashMap<>();
+        request.getParameterMap().forEach((key, values) -> {
+            if (values != null && values.length > 0) {
+                queryParams.put(key, values[0]);
+            }
+        });
+
+        log.info("🔍 SQL PROXY: Fetching from [{}] | Params: {}", tableName, queryParams);
+
+        // REUSE: Call the universal fetch method
+        List<Map<String, Object>> results = dataMirrorService.fetchTableData(tableName, queryParams);
+
+        return ResponseEntity.ok(results);
+    }
+
     @RequestMapping(value = "/**",
             method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE})
     public ResponseEntity<Object> proxyRequest(
@@ -75,7 +103,7 @@ public class FormIoProxyController {
                 .toUri();
 
         // =================================================================
-        // 🛑 READ INTERCEPT (GET)
+        // 🛑 READ INTERCEPT (GET) - REUSING SQL LOGIC
         // =================================================================
         if (method == HttpMethod.GET && request.getRequestURI().endsWith("/submission")) {
             Matcher matcher = SUBMISSION_PATTERN.matcher(request.getRequestURI());
@@ -93,10 +121,11 @@ public class FormIoProxyController {
                             }
                         });
 
-                        log.info("🏷️ SQL TAG FOUND: Intercepting READ for '{}' | Params: {}", formPath, queryParams);
+                        log.info("🏷️ SQL TAG FOUND: Redirecting read for '{}' to SQL Table", formPath);
 
+                        // REUSE: Calling the SAME universal method as /sql-data
                         List<Map<String, Object>> sqlData =
-                                dataMirrorService.fetchSubmissionsFromSql(formPath, queryParams);
+                                dataMirrorService.fetchTableData(formPath, queryParams);
 
                         log.info("✅ Served {} records from SQL for form '{}'", sqlData.size(), formPath);
                         return ResponseEntity.ok(sqlData);
@@ -139,26 +168,22 @@ public class FormIoProxyController {
                                 String formPath = (String) formDef.get("path");
 
                                 // B. Parse Data
-                                Map<String, Object>
-                                        submission =
+                                Map<String, Object> submission =
                                         objectMapper.readValue(responseBody, new TypeReference<>() {
                                         });
                                 Map<String, Object> data = (Map<String, Object>) submission.get("data");
                                 String submissionId = (String) submission.get("_id");
 
                                 // C. Get Config
-// C. Get Config
                                 JsonNode componentNode = objectMapper.valueToTree(formDef.get("components"));
-                                Map<String, Object>
-                                        buttonProps =
+                                Map<String, Object> buttonProps =
                                         formSchemaService.findSubmitButtonProperties(componentNode);
 
                                 // 🟢 CLEANER: Use the Service Logic!
                                 if (buttonProps.containsKey("sqlConfig")) {
 
                                     // 1. Delegate the complex parsing to the service
-                                    List<Map<String, Object>>
-                                            batchPayload =
+                                    List<Map<String, Object>> batchPayload =
                                             formSchemaService.buildBatchPayload(buttonProps, data, submissionId);
 
                                     // 2. Execute

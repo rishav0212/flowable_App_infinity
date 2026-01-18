@@ -149,45 +149,77 @@ public class DataMirrorService {
             throw new RuntimeException("SQL Mirroring Failed", e);
         }
     }
+
+
+//
+
     /**
-     * 🔵 FETCH: Fetches data from SQL using Form.io query params
+     * 🟢 UNIVERSAL FETCH: Handles both "/submission" intercepts AND "/sql-data" proxies.
+     * Supports:
+     * 1. Schema.Table format ("infinity.orders")
+     * 2. Advanced Filters ("data.amount__gt=100", "city=Delhi")
+     * 3. Pagination & Sorting
      */
-    public List<Map<String, Object>> fetchSubmissionsFromSql(String formPath, Map<String, String> queryParams) {
-        String tableName = "tbl_" + formPath.toLowerCase().replaceAll("[^a-z0-9_]", "");
-        log.info("🌐 SQL FETCH: Intercepting request for form [{}] -> table [{}]", formPath, tableName);
+    public List<Map<String, Object>> fetchTableData(String targetTableName, Map<String, String> queryParams) {
+        // 1. Parse Schema & Table
+        String schemaName = null;
+        String tableName = targetTableName;
 
+        if (targetTableName.contains(".")) {
+            String[] parts = targetTableName.split("\\.", 2);
+            schemaName = parts[0];
+            tableName = parts[1];
+        }
+
+        // Sanitize table name (if coming from raw input)
+        if (!tableName.startsWith("tbl_") && !targetTableName.contains(".")) {
+            // Optional: Force prefix if you stick to that convention,
+            // but for generic generic fetching, usually better to leave it raw or handle logic here.
+            // tableName = "tbl_" + tableName;
+        }
+
+        log.info("🌐 SQL FETCH: Querying [{}.{}]", (schemaName != null ? schemaName : "DEFAULT"), tableName);
+
+        // 2. Build Query
         SelectQuery<Record> query = dsl.selectQuery();
-        query.addFrom(DSL.table(DSL.name(tableName)));
+        Table<?> table = (schemaName != null)
+                ? DSL.table(DSL.name(schemaName, tableName))
+                : DSL.table(DSL.name(tableName));
 
-        applyFilters(query, queryParams, tableName);
-        applySorting(query, queryParams);
+        query.addFrom(table);
 
+        // 3. Apply Filters & Sorting (Reusing your Logic!)
+        applyUniversalFilters(query, queryParams);
+        applyUniversalSorting(query, queryParams);
+
+        // 4. Pagination
         int limit = Integer.parseInt(queryParams.getOrDefault("limit", "100"));
         int skip = Integer.parseInt(queryParams.getOrDefault("skip", "0"));
         query.addLimit(skip, limit);
 
         try {
-            log.debug("📡 SQL EXECUTION: Limit={}, Skip={}", limit, skip);
             Result<Record> records = query.fetch();
-            log.info("✅ FETCH SUCCESS: Found {} records in [{}]", records.size(), tableName);
             return mapRecordsToJson(records, queryParams.get("select"));
         } catch (Exception e) {
-            log.error("❌ FETCH FAILED: Table [{}] error: {}", tableName, e.getMessage());
+            log.error("❌ FETCH FAILED: {}", e.getMessage());
             return new ArrayList<>();
         }
     }
 
-    private void applyFilters(SelectQuery<Record> query, Map<String, String> params, String tableName) {
+    // ♻️ REFACTORED FILTER LOGIC (Used by fetchTableData)
+    private void applyUniversalFilters(SelectQuery<Record> query, Map<String, String> params) {
         params.forEach((key, value) -> {
-            if (List.of("limit", "skip", "sort", "select").contains(key)) return;
+            // Skip control params
+            if (List.of("limit", "skip", "sort", "select", "table", "formId").contains(key)) return;
 
+            // 1. Strip "data." prefix (Fixes: data.order_num -> order_num)
             String rawCol = key.replace("data.", "").toLowerCase();
+
+            // 2. Handle Suffixes (e.g. __gt, __regex)
             String colName = rawCol.replaceAll("__[a-z]+$", "");
             Field<Object> field = DSL.field(DSL.name(colName));
 
-            log.debug("🔍 FILTER: Applied condition [{}] = [{}]", colName, value);
-
-            // MySQL uses REGEXP for regex matches
+            // 3. Apply Conditions
             if (key.endsWith("__regex")) query.addConditions(DSL.condition("{0} REGEXP ?", field, value));
             else if (key.endsWith("__gt")) query.addConditions(field.gt(value));
             else if (key.endsWith("__gte")) query.addConditions(field.ge(value));
@@ -195,24 +227,22 @@ public class DataMirrorService {
             else if (key.endsWith("__lte")) query.addConditions(field.le(value));
             else if (key.endsWith("__ne")) query.addConditions(field.ne(value));
             else if (key.endsWith("__in")) query.addConditions(field.in(Arrays.asList(value.split(","))));
-            else query.addConditions(field.eq(value));
+            else query.addConditions(field.eq(value)); // <--- THIS HANDLES data.order_num = "6543"
         });
     }
 
-    private void applySorting(SelectQuery<Record> query, Map<String, String> params) {
+    // ♻️ REFACTORED SORT LOGIC
+    private void applyUniversalSorting(SelectQuery<Record> query, Map<String, String> params) {
         String sortParam = params.get("sort");
         if (sortParam != null && !sortParam.isEmpty()) {
             SortOrder order = sortParam.startsWith("-") ? SortOrder.DESC : SortOrder.ASC;
             String colName = (sortParam.startsWith("-") ? sortParam.substring(1) : sortParam)
                     .replace("data.", "").toLowerCase().replaceAll("[^a-z0-9_]", "");
-            if (colName.equals("created")) colName = "created_at";
 
-            log.debug("🔃 SORT: Ordering by [{}] {}", colName, order);
             query.addOrderBy(DSL.field(DSL.name(colName)).sort(order));
-        } else {
-            query.addOrderBy(DSL.field(DSL.name("created_at")).desc());
         }
     }
+
 
     private List<Map<String, Object>> mapRecordsToJson(Result<Record> records, String selectParam) {
         List<String> allowedFields = (selectParam != null)
