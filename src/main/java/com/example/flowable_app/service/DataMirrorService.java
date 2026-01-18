@@ -20,44 +20,74 @@ public class DataMirrorService {
     private final DSLContext dsl;
     private final ObjectMapper objectMapper;
 
+//
+// ... existing imports ...
+
     /**
-     * 🟢 SAVE: Takes Form.io JSON data and inserts/updates it in MySQL
+     * 🟢 BATCH SAVE: Updates multiple tables in ONE transaction.
      */
+    @Transactional
+    public void mirrorBatch(List<Map<String, Object>> batchOperations) {
+        log.info("📦 SQL BATCH: Starting transaction for {} operations...", batchOperations.size());
+        for (Map<String, Object> operation : batchOperations) {
+            String table = (String) operation.get("table");
+            Map<String, Object> keys = (Map<String, Object>) operation.get("keys");
+            Map<String, Object> data = (Map<String, Object>) operation.get("data");
+
+            // Reuse the single mirror logic for each item
+            mirrorDataToTable(table, keys, data);
+        }
+        log.info("✅ BATCH COMPLETE: All tables synchronized.");
+    }
+
     /**
-     * 🟢 SAVE: Checks if row exists based on 'identifiers' map, then Inserts or Updates.
+     * 🟢 SAVE: Insert/Update with Schema Support (e.g. "infinity.orders")
+     * NOTE: Does NOT add "tbl_" prefix automatically. We trust your input.
      */
     @Transactional
     public void mirrorDataToTable(String targetTableName, Map<String, Object> identifiers, Map<String, Object> data) {
-        log.info("🪞 SQL MIRROR: Syncing table [{}] | Keys: {}", targetTableName, identifiers);
+        log.info("🪞 SQL MIRROR: Syncing [{}] | Keys: {}", targetTableName, identifiers);
 
         try {
-            // 1. Sanitize Table Name
-            String tableName = targetTableName.startsWith("tbl_")
-                    ? targetTableName
-                    : "tbl_" + targetTableName.toLowerCase().replaceAll("[^a-z0-9_]", "");
+            // 1. PARSE SCHEMA & TABLE (Manual Control)
+            String schemaName = null;
+            String tableName = targetTableName;
 
-            // 2. Fetch Schema
-            Map<String, String> columnTypes = dsl.select(
+            // Handle "schema.table" format
+            if (targetTableName.contains(".")) {
+                String[] parts = targetTableName.split("\\.", 2);
+                schemaName = parts[0];
+                tableName = parts[1];
+            }
+
+            // 2. FETCH COLUMNS (Smart Lookup)
+            var step = dsl.select(
                             DSL.field("column_name", String.class),
                             DSL.field("data_type", String.class)
                     )
                     .from("information_schema.columns")
-                    .where(DSL.field("table_name").eq(tableName))
-                    .and(DSL.field("table_schema").eq(DSL.function("DATABASE", String.class)))
-                    .fetchMap(
-                            field -> field.get("column_name", String.class).toLowerCase(),
-                            field -> field.get("data_type", String.class).toLowerCase()
-                    );
+                    .where(DSL.field("table_name").eq(tableName));
+
+            // If schema provided, filter by it. Else use current DB.
+            if (schemaName != null) {
+                step = step.and(DSL.field("table_schema").eq(schemaName));
+            } else {
+                step = step.and(DSL.field("table_schema").eq(DSL.function("DATABASE", String.class)));
+            }
+
+            Map<String, String> columnTypes = step.fetchMap(
+                    field -> field.get("column_name", String.class).toLowerCase(),
+                    field -> field.get("data_type", String.class).toLowerCase()
+            );
 
             if (columnTypes.isEmpty()) {
-                log.warn("⚠️ MIRROR ABORTED: Table [{}] does not exist.", tableName);
+                log.warn("⚠️ MIRROR ABORTED: Table [{}{}] does not exist.",
+                        (schemaName != null ? schemaName + "." : ""), tableName);
                 return;
             }
 
-            // 3. Prepare Data for Write
+            // 3. PREPARE DATA
             Map<Field<?>, Object> writeData = new HashMap<>();
-
-            // Merge identifiers into payload so they are included in the INSERT
             Map<String, Object> finalData = new HashMap<>(data);
             identifiers.forEach(finalData::putIfAbsent);
 
@@ -70,10 +100,7 @@ public class DataMirrorService {
                     Field<Object> field = DSL.field(DSL.name(colName));
 
                     if ("json".equalsIgnoreCase(dbType) && (value instanceof Map || value instanceof List)) {
-                        try {
-                            value = objectMapper.writeValueAsString(value);
-                        } catch (Exception e) {
-                        }
+                        try { value = objectMapper.writeValueAsString(value); } catch (Exception e) {}
                     } else if (value instanceof Map || value instanceof List) {
                         value = value.toString();
                     }
@@ -81,7 +108,12 @@ public class DataMirrorService {
                 }
             }
 
-            // 4. CHECK EXISTENCE (Build Dynamic WHERE clause)
+            // 4. DEFINE SQL TABLE TARGET
+            Table<?> sqlTable = (schemaName != null)
+                    ? DSL.table(DSL.name(schemaName, tableName))
+                    : DSL.table(DSL.name(tableName));
+
+            // 5. CHECK EXISTENCE
             Condition matchCondition = DSL.noCondition();
             boolean validKeyFound = false;
 
@@ -94,39 +126,29 @@ public class DataMirrorService {
             }
 
             if (!validKeyFound) {
-                log.error("❌ MIRROR FAILED: No valid identifier columns found for table [{}].", tableName);
+                log.error("❌ MIRROR FAILED: No valid keys found for [{}].", targetTableName);
                 return;
             }
 
-            boolean exists = dsl.fetchExists(
-                    dsl.selectOne().from(DSL.table(DSL.name(tableName))).where(matchCondition)
-            );
+            boolean exists = dsl.fetchExists(dsl.selectOne().from(sqlTable).where(matchCondition));
 
-            // 5. EXECUTE
+            // 6. EXECUTE UPSERT
             if (exists) {
-                log.info("🔄 MATCH FOUND: Updating record...");
-                dsl.update(DSL.table(DSL.name(tableName)))
-                        .set(writeData)
-                        .where(matchCondition)
-                        .execute();
+                log.info("🔄 UPDATING record in [{}]...", targetTableName);
+                dsl.update(sqlTable).set(writeData).where(matchCondition).execute();
             } else {
-                log.info("✨ NO MATCH: Inserting new record...");
-                // Auto-generate UUID for 'id' if required and missing
+                log.info("✨ INSERTING record into [{}]...", targetTableName);
                 if (columnTypes.containsKey("id") && !writeData.containsKey(DSL.field(DSL.name("id")))) {
                     writeData.put(DSL.field(DSL.name("id")), UUID.randomUUID().toString());
                 }
-                dsl.insertInto(DSL.table(DSL.name(tableName)))
-                        .set(writeData)
-                        .execute();
+                dsl.insertInto(sqlTable).set(writeData).execute();
             }
-            log.info("✅ SYNC COMPLETE for table [{}]", tableName);
 
         } catch (Exception e) {
             log.error("❌ MIRROR CRASH: {}", e.getMessage(), e);
             throw new RuntimeException("SQL Mirroring Failed", e);
         }
     }
-
     /**
      * 🔵 FETCH: Fetches data from SQL using Form.io query params
      */

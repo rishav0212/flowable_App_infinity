@@ -1,6 +1,7 @@
 package com.example.flowable_app.service;
 
 import com.example.flowable_app.client.FormIoClient;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
@@ -9,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,37 +48,77 @@ public class FormSchemaService {
         }
 
 
-
-        // 4. MIRROR TO SQL (If "sql" tag exists)
+// 4. MIRROR TO SQL (Batch Support)
         if (hasSqlTag(formSchema)) {
-            log.info("🏷️ SQL tag detected. Starting SQL mirroring process...");
+            log.info("🏷️ SQL tag detected. Scanning for targets...");
 
             JsonNode componentNode = objectMapper.valueToTree(formSchema.get("components"));
             Map<String, Object> buttonProps = findSubmitButtonProperties(componentNode);
 
-            String targetTable = (String) buttonProps.get("targetTable");
+            // 🟢 STRATEGY 1: "writeTargets" (Batch Update)
+            if (buttonProps.containsKey("writeTargets")) {
+                try {
+                    String jsonConfig = (String) buttonProps.get("writeTargets");
 
-            if (targetTable != null) {
-                // 🟢 NEW LOGIC: Build the Identifiers Map
+                    // Parse Config: [{"table": "infinity.orders", "keys": {"col":"path"}}, ...]
+                    List<Map<String, Object>> targets = objectMapper.readValue(jsonConfig, new TypeReference<>() {
+                    });
+                    List<Map<String, Object>> batchPayload = new ArrayList<>();
+
+                    for (Map<String, Object> target : targets) {
+                        String tableName = (String) target.get("table");
+                        Map<String, String> keyConfig = (Map<String, String>) target.get("keys");
+
+                        // Extract identifiers for THIS specific table
+                        Map<String, Object> identifiers = new HashMap<>();
+                        if (keyConfig != null) {
+                            keyConfig.forEach((colName, jsonPath) -> {
+                                String val = extractValueByPath(userFormData, jsonPath);
+                                if (val != null) identifiers.put(colName, val);
+                            });
+                        }
+
+                        // Fallback: If no keys found, use Submission ID
+                        if (identifiers.isEmpty()) {
+                            identifiers.put("id", submissionId);
+                            userFormData.put("id", submissionId);
+                        }
+
+                        // Add to Batch List
+                        Map<String, Object> operation = new HashMap<>();
+                        operation.put("table", tableName);
+                        operation.put("keys", identifiers);
+                        operation.put("data", userFormData);
+
+                        batchPayload.add(operation);
+                    }
+
+                    // Execute Batch
+                    if (!batchPayload.isEmpty()) {
+                        dataMirrorService.mirrorBatch(batchPayload);
+                    }
+
+                } catch (Exception e) {
+                    log.error("❌ Failed to process 'writeTargets': {}", e.getMessage());
+                }
+            }
+            // 🔙 STRATEGY 2: Legacy "targetTable" (Single Table)
+            else if (buttonProps.containsKey("targetTable")) {
+                String targetTable = (String) buttonProps.get("targetTable");
                 Map<String, Object> identifiers = extractIdentifiers(buttonProps, userFormData);
 
                 if (identifiers.isEmpty()) {
-                    log.info("⚠️ No custom upsert keys found. Falling back to Submission ID: {}", submissionId);
                     identifiers.put("id", submissionId);
-                    userFormData.put("id", submissionId); // Ensure it's in the data payload for INSERT
+                    userFormData.put("id", submissionId);
                 }
+
                 try {
-                    // 🟢 CALL UPDATED SERVICE
                     dataMirrorService.mirrorDataToTable(targetTable, identifiers, userFormData);
                     log.info("🪞 SQL Mirroring completed for table [{}]", targetTable);
                 } catch (Exception e) {
                     log.error("❌ SQL Mirroring failed: {}", e.getMessage());
                 }
-            } else {
-                log.warn("⚠️ SQL Tag found, but no 'targetTable' property found.");
             }
-        } else {
-            log.debug("ℹ️ No SQL tag found for form [{}]. Skipping mirror.", targetFormKey);
         }
 
         // 5. PREPARE VARIABLES

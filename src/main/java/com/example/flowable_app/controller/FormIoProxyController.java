@@ -21,6 +21,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,7 +39,6 @@ public class FormIoProxyController {
     private final DataMirrorService dataMirrorService;
     private final FormIoClient formIoClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
-
     private final FormSchemaService formSchemaService;
 
     // Regex: Matches .../form/{formId}/submission
@@ -68,30 +68,25 @@ public class FormIoProxyController {
 
         String requestPath = request.getRequestURI().substring("/api/forms".length());
 
-        // 🔍 DEBUG: Log Entry
         log.info("🌍 PROXY REQUEST: [{}] {}", method, requestPath);
 
-        // 1. Build URI
         URI uri = UriComponentsBuilder.fromHttpUrl(formIoUrl + requestPath)
                 .query(request.getQueryString())
                 .build(true)
                 .toUri();
 
         // =================================================================
-        // 🛑 READ INTERCEPT (GET): Serves data from SQL if 'sql' tag exists
+        // 🛑 READ INTERCEPT (GET)
         // =================================================================
         if (method == HttpMethod.GET && request.getRequestURI().endsWith("/submission")) {
             Matcher matcher = SUBMISSION_PATTERN.matcher(request.getRequestURI());
             if (matcher.find()) {
                 String formId = matcher.group(1);
                 try {
-                    log.debug("🔎 Checking tags for Form ID: {}", formId);
                     Map<String, Object> formDef = formIoClient.getForm(formId);
 
                     if (hasSqlTag(formDef)) {
                         String formPath = (String) formDef.get("path");
-
-                        // Convert Params
                         Map<String, String> queryParams = new HashMap<>();
                         request.getParameterMap().forEach((key, values) -> {
                             if (values != null && values.length > 0) {
@@ -99,19 +94,13 @@ public class FormIoProxyController {
                             }
                         });
 
-                        log.info("🏷️ SQL TAG FOUND: Intercepting READ for 'tbl_{}' | Params: {}",
-                                formPath,
-                                queryParams);
+                        log.info("🏷️ SQL TAG FOUND: Intercepting READ for '{}' | Params: {}", formPath, queryParams);
 
-                        // Fetch from SQL
-                        List<Map<String, Object>>
-                                sqlData =
+                        List<Map<String, Object>> sqlData =
                                 dataMirrorService.fetchSubmissionsFromSql(formPath, queryParams);
 
                         log.info("✅ Served {} records from SQL for form '{}'", sqlData.size(), formPath);
                         return ResponseEntity.ok(sqlData);
-                    } else {
-                        log.debug("📝 No 'sql' tag found. Proceeding to MongoDB.");
                     }
                 } catch (Exception e) {
                     log.warn("⚠️ READ INTERCEPT FAILED: {}. Fallback to MongoDB.", e.getMessage());
@@ -119,7 +108,7 @@ public class FormIoProxyController {
             }
         }
 
-        // 2. PROXY EXECUTION (Forward to Form.io / MongoDB)
+        // 2. PROXY EXECUTION
         String token = authService.getAccessToken();
         HttpHeaders headers = new HttpHeaders();
         headers.set("x-jwt-token", token);
@@ -127,12 +116,11 @@ public class FormIoProxyController {
         HttpEntity<String> entity = new HttpEntity<>(body, headers);
 
         try {
-            log.debug("🚀 Forwarding to Form.io: {}", uri);
             ResponseEntity<String> response = restTemplate.exchange(uri, method, entity, String.class);
             log.info("⬅️ Response from Form.io: {}", response.getStatusCode());
 
             // =================================================================
-            // 🛑 WRITE INTERCEPT (POST/PUT): Mirrors to SQL after Mongo success
+            // 🛑 WRITE INTERCEPT (POST/PUT): SQL Mirroring
             // =================================================================
             boolean isSubmission = request.getRequestURI().endsWith("/submission");
             boolean isWrite = (method == HttpMethod.POST || method == HttpMethod.PUT);
@@ -143,36 +131,71 @@ public class FormIoProxyController {
                     String formId = matcher.group(1);
                     String responseBody = response.getBody();
 
-                    // Run Async to keep UI fast
+                    // Async Thread
                     new Thread(() -> {
                         try {
-                            log.debug("⏳ ASYNC: Checking if new submission needs SQL Mirror...");
-
                             // A. Check Tags
                             Map<String, Object> formDef = formIoClient.getForm(formId);
                             if (hasSqlTag(formDef)) {
                                 String formPath = (String) formDef.get("path");
 
-                                // B. Parse Submission Data
-                                Map<String, Object> submission = objectMapper.readValue(responseBody, new TypeReference<>() {});
+                                // B. Parse Data
+                                Map<String, Object>
+                                        submission =
+                                        objectMapper.readValue(responseBody, new TypeReference<>() {
+                                        });
                                 Map<String, Object> data = (Map<String, Object>) submission.get("data");
                                 String submissionId = (String) submission.get("_id");
 
-                                // C. Extract Keys (UPDATED LOGIC)
+                                // C. Get Config
                                 JsonNode componentNode = objectMapper.valueToTree(formDef.get("components"));
-                                Map<String, Object> buttonProps = formSchemaService.findSubmitButtonProperties(componentNode);
+                                Map<String, Object>
+                                        buttonProps =
+                                        formSchemaService.findSubmitButtonProperties(componentNode);
 
-                                Map<String, Object> identifiers = formSchemaService.extractIdentifiers(buttonProps, data);
+                                // 🟢 STRICT STRATEGY: ONLY "writeTargets"
+                                if (buttonProps.containsKey("writeTargets")) {
+                                    String jsonConfig = (String) buttonProps.get("writeTargets");
+                                    List<Map<String, Object>>
+                                            targets =
+                                            objectMapper.readValue(jsonConfig, new TypeReference<>() {
+                                            });
+                                    List<Map<String, Object>> batchPayload = new ArrayList<>();
 
-                                // Fallback: If no keys configured, use Form.io _id -> id
-                                if (identifiers.isEmpty()) {
-                                    identifiers.put("id", submissionId);
-                                    data.put("id", submissionId);
+                                    for (Map<String, Object> target : targets) {
+                                        String tableName = (String) target.get("table");
+                                        Map<String, String> keyConfig = (Map<String, String>) target.get("keys");
+
+                                        // Extract Keys
+                                        Map<String, Object> identifiers = new HashMap<>();
+                                        if (keyConfig != null) {
+                                            keyConfig.forEach((colName, jsonPath) -> {
+                                                String val = formSchemaService.extractValueByPath(data, jsonPath);
+                                                if (val != null) identifiers.put(colName, val);
+                                            });
+                                        }
+
+                                        // Fallback: If specific keys missing, use Submission ID
+                                        if (identifiers.isEmpty()) {
+                                            identifiers.put("id", submissionId);
+                                            data.put("id", submissionId);
+                                        }
+
+                                        Map<String, Object> operation = new HashMap<>();
+                                        operation.put("table", tableName);
+                                        operation.put("keys", identifiers);
+                                        operation.put("data", data);
+                                        batchPayload.add(operation);
+                                    }
+
+                                    log.info("🪞 MIRRORING: Batch write to {} targets.", batchPayload.size());
+                                    dataMirrorService.mirrorBatch(batchPayload);
+                                } else {
+                                    // ❌ ERROR: Tag exists, but no config
+                                    log.error(
+                                            "❌ MIRROR SKIPPED: Form '{}' has 'sql' tag but MISSING 'writeTargets' property on Submit button.",
+                                            formPath);
                                 }
-
-                                // D. Call Updated Service
-                                log.info("🪞 MIRRORING: Writing to 'tbl_{}' | Keys: {}", formPath, identifiers);
-                                dataMirrorService.mirrorDataToTable(formPath, identifiers, data);
                             }
                         } catch (Exception e) {
                             log.error("❌ ASYNC MIRROR FAILED: {}", e.getMessage());
@@ -181,28 +204,22 @@ public class FormIoProxyController {
                 }
             }
 
-            // =================================================================
-            // 🛑 SCHEMA SYNC INTERCEPT (Form Definition Changes)
-            // =================================================================
+            // Schema Sync
             boolean isFormDef = requestPath.contains("/form") && !requestPath.contains("/submission");
             if (isFormDef && isWrite && response.getStatusCode().is2xxSuccessful() && body != null) {
-                log.info("🛠️ SCHEMA CHANGE DETECTED: Triggering Schema Sync...");
                 new Thread(() -> schemaSyncService.syncFormDefinition(body)).start();
             }
 
             return cleanResponse(response);
 
         } catch (HttpClientErrorException.Unauthorized e) {
-            log.error("🚫 TOKEN EXPIRED: Invalidating token and returning 401.");
             authService.invalidateToken();
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         } catch (Exception e) {
-            log.error("💥 PROXY ERROR: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
     }
 
-    // Helper: Clean Headers
     private ResponseEntity<Object> cleanResponse(ResponseEntity<String> upstreamResponse) {
         HttpHeaders cleanHeaders = new HttpHeaders();
         cleanHeaders.putAll(upstreamResponse.getHeaders());
@@ -213,7 +230,6 @@ public class FormIoProxyController {
         return new ResponseEntity<>(upstreamResponse.getBody(), cleanHeaders, upstreamResponse.getStatusCode());
     }
 
-    // Helper: Check for 'sql' tag
     private boolean hasSqlTag(Map<String, Object> formDef) {
         List<String> tags = (List<String>) formDef.get("tags");
         if (tags != null) {
