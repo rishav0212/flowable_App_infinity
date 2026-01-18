@@ -154,7 +154,7 @@ public class FormIoProxyController {
                                         formSchemaService.findSubmitButtonProperties(componentNode);
 
                                 // 🟢 CLEANER: Use the Service Logic!
-                                if (buttonProps.containsKey("writeTargets")) {
+                                if (buttonProps.containsKey("sqlConfig")) {
 
                                     // 1. Delegate the complex parsing to the service
                                     List<Map<String, Object>>
@@ -167,7 +167,7 @@ public class FormIoProxyController {
                                         dataMirrorService.mirrorBatch(batchPayload);
                                     }
                                 } else {
-                                    log.error("❌ MIRROR SKIPPED: Form '{}' has 'sql' tag but MISSING 'writeTargets'.",
+                                    log.error("❌ MIRROR SKIPPED: Form '{}' has 'sql' tag but MISSING 'sqlConfig'.",
                                             formPath);
                                 }
                             }

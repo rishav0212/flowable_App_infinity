@@ -56,7 +56,7 @@ public class FormSchemaService {
             Map<String, Object> buttonProps = findSubmitButtonProperties(componentNode);
 
             // 🟢 STRATEGY 1: "sqlConfig" (Batch Update)
-            if (buttonProps.containsKey("writeTargets")) {
+            if (buttonProps.containsKey("sqlConfig")) {
                 // Reuse the same method!
                 List<Map<String, Object>> batchPayload = buildBatchPayload(buttonProps, userFormData, submissionId);
 
