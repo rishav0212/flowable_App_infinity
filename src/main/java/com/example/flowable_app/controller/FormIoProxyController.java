@@ -125,7 +125,7 @@ public class FormIoProxyController {
 
                         // REUSE: Calling the SAME universal method as /sql-data
                         List<Map<String, Object>> sqlData =
-                                dataMirrorService.fetchTableData(formPath, queryParams);
+                                dataMirrorService.fetchTableData("tbl_"+formPath, queryParams);
 
                         log.info("✅ Served {} records from SQL for form '{}'", sqlData.size(), formPath);
                         return ResponseEntity.ok(sqlData);
