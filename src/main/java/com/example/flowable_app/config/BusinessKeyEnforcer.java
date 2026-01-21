@@ -1,13 +1,16 @@
 package com.example.flowable_app.config;
 
+
 import org.flowable.common.engine.api.FlowableIllegalArgumentException;
 import org.flowable.common.engine.api.delegate.event.FlowableEngineEventType;
 import org.flowable.common.engine.api.delegate.event.FlowableEntityEvent;
 import org.flowable.common.engine.api.delegate.event.FlowableEvent;
 import org.flowable.common.engine.api.delegate.event.FlowableEventListener;
 import org.flowable.engine.HistoryService;
+import org.flowable.engine.RepositoryService; // 🟢 Add this
 import org.flowable.engine.RuntimeService;
 import org.flowable.engine.history.HistoricProcessInstance;
+import org.flowable.engine.repository.ProcessDefinition; // 🟢 Add this
 import org.flowable.engine.impl.persistence.entity.ExecutionEntity;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
@@ -20,12 +23,15 @@ public class BusinessKeyEnforcer implements FlowableEventListener {
 
     private final HistoryService historyService;
     private final RuntimeService runtimeService;
+    private final RepositoryService repositoryService; // 🟢 Add this
 
-    // Use @Lazy to avoid circular dependency issues
     @Autowired
-    public BusinessKeyEnforcer(@Lazy HistoryService historyService, @Lazy RuntimeService runtimeService) {
+    public BusinessKeyEnforcer(@Lazy HistoryService historyService,
+                               @Lazy RuntimeService runtimeService,
+                               @Lazy RepositoryService repositoryService) { // 🟢 Add this
         this.historyService = historyService;
         this.runtimeService = runtimeService;
+        this.repositoryService = repositoryService;
     }
 
     @Override
@@ -37,8 +43,16 @@ public class BusinessKeyEnforcer implements FlowableEventListener {
                 if (entity instanceof ExecutionEntity) {
                     ExecutionEntity execution = (ExecutionEntity) entity;
 
-                    // Ensure this is the ROOT execution (the process instance itself)
                     if (execution.isProcessInstanceType() && execution.getParentId() == null) {
+
+                        // 🟢 DYNAMIC CHECK: Get Process Category
+                        ProcessDefinition procDef = repositoryService.getProcessDefinition(execution.getProcessDefinitionId());
+
+                        // If category is "SYSTEM", we skip the business key requirement
+                        if ("SCHEDULER".equalsIgnoreCase(procDef.getCategory())) {
+                            return;
+                        }
+
                         validateBusinessKey(
                                 execution.getBusinessKey(),
                                 execution.getProcessDefinitionKey()
@@ -48,7 +62,6 @@ public class BusinessKeyEnforcer implements FlowableEventListener {
             }
         }
     }
-
     private void validateBusinessKey(String businessKey, String processDefinitionKey) {
         // 1. RULE: Mandatory Presence
         if (businessKey == null || businessKey.trim().isEmpty()) {
