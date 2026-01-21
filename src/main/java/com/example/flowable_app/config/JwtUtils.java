@@ -1,6 +1,7 @@
 package com.example.flowable_app.config; // <--- Note the package is 'config'
 
 
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
@@ -25,19 +26,22 @@ public class JwtUtils {
     }
 
 
-    public String generateToken(String email) {
+    public String generateToken(String internalId, String email, String name) {
         return Jwts.builder()
                 .setSubject(email)
+                .claim("id", internalId)
+                .claim("name", name)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION_MS))
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
     }
 
-    public String validateToken(String token) {
+    // 🟢 UPDATED: Returns full Claims instead of just subject
+    public Claims validateToken(String token) {
         try {
             return Jwts.parserBuilder().setSigningKey(key).build()
-                    .parseClaimsJws(token).getBody().getSubject();
+                    .parseClaimsJws(token).getBody();
         } catch (Exception e) {
             return null;
         }

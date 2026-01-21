@@ -1,5 +1,6 @@
 package com.example.flowable_app.config; // <--- Package 'config'
 
+import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,6 +15,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -43,17 +45,28 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         // 3. Validate whatever token we found
         if (token != null) {
-            String email = jwtUtils.validateToken(token);
+            Claims claims = jwtUtils.validateToken(token);
 
-            if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+            if (claims != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+                // 🟢 CREATE A USER MAP TO STORE IN PRINCIPAL
+                Map<String, Object> userDetails = Map.of(
+                        "id", claims.get("id"),
+                        "name", claims.get("name"),
+                        "email", claims.getSubject()
+                );
+
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                        email, null, Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")));
+                        userDetails, // Store the map as the principal
+                        null,
+                        Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
+                );
 
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
             }
         }
-
         filterChain.doFilter(request, response);
+
+
     }
 }

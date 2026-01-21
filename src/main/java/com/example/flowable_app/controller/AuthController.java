@@ -3,11 +3,11 @@ package com.example.flowable_app.controller;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.security.Principal;
 import java.util.List;
 import java.util.Map;
 
@@ -16,20 +16,21 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/auth")
-@Slf4j // Enables log.info, log.error, etc.
+@Slf4j
 public class AuthController {
 
     /**
      * Retrieves the current authenticated user's profile based on the JWT Principal.
-     * * @param principal The security principal injected by Spring Security (JwtAuthenticationFilter).
+     * * @param authentication The security context injected by Spring Security.
+     *
      * @return User metadata or 401 Unauthorized.
      */
     @GetMapping("/me")
-    public ResponseEntity<?> getCurrentUser(Principal principal) {
+    public ResponseEntity<?> getCurrentUser(Authentication authentication) {
         try {
-            // 1. Check if the security context has a valid principal
-            if (principal == null) {
-                log.warn("⚠️ [Auth] Access attempt to /me without valid authentication context (Principal is null)");
+            // 1. Check if the security context has a valid authentication object
+            if (authentication == null || !authentication.isAuthenticated()) {
+                log.warn("⚠️ [Auth] Access attempt to /me without valid authentication context");
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                         .body(Map.of(
                                 "error", "Not authenticated",
@@ -37,21 +38,36 @@ public class AuthController {
                         ));
             }
 
-            // 2. Extract the Subject/ID (e.g., "Rishab_J")
-            String userId = principal.getName();
+            // 2. Extract the Map principal created in JwtAuthenticationFilter
+            Object principal = authentication.getPrincipal();
 
-            log.info("👤 [Auth] Profile retrieved successfully for User ID: [{}]", userId);
+            if (!(principal instanceof Map)) {
+                log.error("❌ [Auth] Principal is not a Map. Type found: {}", principal.getClass().getName());
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(Map.of("error", "Internal Configuration Error"));
+            }
 
-            // 3. Return structured response
+            @SuppressWarnings("unchecked")
+            Map<String, Object> details = (Map<String, Object>) principal;
+
+            // 🟢 Extract clean string values (Prevents the {id=...} URL error)
+            String userId = (String) details.get("id");
+            String email = (String) details.get("email");
+            String name = (String) details.get("name");
+
+            log.info("👤 [Auth] Profile retrieved successfully for User: [{}] ({})", userId, email);
+
+            // 3. Return structured response including all new fields
             return ResponseEntity.ok(Map.of(
-                    "username", userId,
+                    "username", userId, // 🟢 Frontend uses this for Task fetching
                     "id", userId,
+                    "email", email,
+                    "name", name,
                     "authorities", List.of(Map.of("authority", "ROLE_USER")),
                     "authenticated", true
             ));
 
         } catch (Exception e) {
-            // 4. Global safety net for unexpected errors
             log.error("🔥 [Auth] Unexpected error during /me endpoint execution: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of(
