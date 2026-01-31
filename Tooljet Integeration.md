@@ -14,7 +14,7 @@ To solve this **correctly and securely**, we implemented a **Ticket → Cookie P
 
 ### In one sentence:
 
-> **A one‑time, JWT‑protected ticket is exchanged for a short‑lived BFF cookie (“wristband”), allowing ToolJet’s SPA assets and APIs to load through a controlled proxy.**
+> **A one‑time, JWT‑protected ticket is exchanged for a short‑lived BFF cookie ("wristband"), allowing ToolJet's SPA assets and APIs to load through a controlled proxy.**
 
 This pattern is used internally by enterprise platforms that embed dashboards, analytics tools, and admin UIs.
 
@@ -25,10 +25,9 @@ This pattern is used internally by enterprise platforms that embed dashboards, a
 ### 1️⃣ Iframe Authentication Gap
 
 * Browsers **do not attach Authorization headers** to iframe asset requests:
-
-    * `/assets/*.js`
-    * `/api/v2/queries`
-    * `/run/*`
+  * `/assets/*.js`
+  * `/api/v2/queries`
+  * `/run/*`
 * ToolJet is a **Single Page Application (SPA)** and depends on these routes.
 
 ### 2️⃣ ToolJet Community Edition Limitations
@@ -96,6 +95,10 @@ This pattern is used internally by enterprise platforms that embed dashboards, a
 
 ### Phase 1: Ticket Issuance
 
+The ticket answers one question:
+
+> **"Was this iframe request initiated by an already-authenticated user?"**
+
 ```
 React → POST /api/tooljet/embed-ticket (JWT)
 BFF   → validate JWT
@@ -103,7 +106,37 @@ BFF   → generate one‑time ticket
 BFF   → return iframe URL
 ```
 
+**Why JWT is required here**:
+* This is the **only place** user identity is trusted
+* Prevents anonymous iframe access
+
+**Ticket Lifecycle**:
+```
+React (JWT) → /api/tooljet/embed-ticket
+BFF validates JWT
+BFF creates UUID ticket
+BFF stores identity temporarily
+```
+
+**Properties**:
+* One-time use
+* Short TTL (≈ 60s)
+* Never exposed again
+
+**Why NOT Email / User ID in URL**:
+```http
+/applications/my-app?email=admin@company.com
+```
+This fails because:
+* Anyone can type it
+* URLs are guessable
+* URLs leak via logs, bookmarks, referers
+
+The **ticket is a secret**, not an identifier.
+
 ### Phase 2: Ticket Promotion
+
+On first iframe hit, the **wristband cookie** is issued:
 
 ```
 Browser → GET /tooljet/ticket/{ticket}/applications/{appId}
@@ -111,6 +144,14 @@ BFF     → validate ticket
 BFF     → SET COOKIE TJ_BFF_SESSION
 BFF     → proxy ToolJet HTML
 ```
+
+The BFF:
+1. Validates ticket
+2. Resolves identity
+3. Drops `TJ_BFF_SESSION` cookie
+4. Deletes the ticket
+
+> **Ticket dies. Cookie lives (briefly).**
 
 ### Phase 3: Asset & API Continuity
 
@@ -138,6 +179,58 @@ They always hit the **BFF**, because the iframe origin is the BFF.
 
 ---
 
+## 🧠 The "Invisible Header" Problem (Browser Limitation)
+
+### What the Main Application Uses
+
+InfinityPlus uses **JWT-based authentication**.
+
+```http
+Authorization: Bearer <JWT_TOKEN>
+```
+
+This works perfectly for:
+* XHR / fetch calls
+* REST APIs
+* GraphQL
+
+### ❌ What Fails with iframes
+
+When you do:
+
+```html
+<iframe src="http://localhost:8080/applications/my-app" />
+```
+
+The browser:
+* **DOES NOT send custom headers**
+* **DOES NOT send Authorization headers**
+* **DOES NOT allow injecting headers** into `<script>`, `<link>`, or `<img>` tags
+
+This is **browser-enforced behavior**, not a bug.
+
+### The Resulting Failure
+
+1. HTML loads
+2. JS / CSS assets request `/assets/*.js`
+3. Spring Security expects JWT
+4. No JWT is present
+5. Backend returns `401`
+6. ToolJet SPA crashes → **White Screen**
+
+### ✅ The Only Viable Solution
+
+> **Move from Header-based auth (JWT) → Cookie-based continuity**
+
+Why cookies?
+* Browsers automatically attach cookies
+* Cookies work for all sub-resources
+* Cookies survive page reloads inside iframe
+
+This is **not optional**. Any iframe-based SPA must use cookies for continuity.
+
+---
+
 ## 🧠 ToolJetBffController – Deep Dive
 
 ### Responsibilities
@@ -149,8 +242,6 @@ They always hit the **BFF**, because the iframe origin is the BFF.
 5. URL rewriting
 6. Session retry
 
----
-
 ### `/api/tooljet/embed-ticket`
 
 **Purpose**: Securely bootstrap iframe access.
@@ -160,7 +251,6 @@ They always hit the **BFF**, because the iframe origin is the BFF.
 ```
 
 **Why JWT is required here**:
-
 * This is the **only place** user identity is trusted
 * Prevents anonymous iframe access
 
@@ -171,13 +261,10 @@ They always hit the **BFF**, because the iframe origin is the BFF.
 **Purpose**: First iframe entry
 
 What happens:
-
 * Ticket validated
 * Wristband cookie set
 * ToolJet HTML proxied
 * URL synchronized for ToolJet router
-
----
 
 ### Cookie Injection Logic (Critical)
 
@@ -190,58 +277,54 @@ ResponseCookie.from("TJ_BFF_SESSION", userEmail)
 
 ---
 
-## 🧠 URL Synchronization Hack (Why It Exists)
+## 🧠 Identity Mirror (ToolJet CE Limitation)
 
-ToolJet’s internal React Router **only activates** if the URL matches:
+### The Core Problem
 
-```
-/applications/{uuid}
-```
+ToolJet Community Edition:
+* Has its own users
+* Has its own sessions
+* Has **zero knowledge** of InfinityPlus users
 
-But our iframe URL is:
+### What Happens Without a BFF
 
-```
-/tooljet/ticket/{ticket}/applications/{uuid}
-```
-
-### Solution
-
-We inject a script:
-
-```html
-<script>
-window.history.replaceState({}, '', '/applications/{uuid}');
-</script>
-```
-
-Without this:
-
-* White screen
-* No errors
-* ToolJet never boots
-
----
-
-## 🔁 JSON Host Rewriting (Identity Mirror)
-
-ToolJet returns configuration JSON containing:
+If user connects directly:
 
 ```
-localhost:8082
+Browser → ToolJet
 ```
 
-This would bypass the BFF.
+ToolJet responds:
+* Login screen
+* Or 401
 
-### Fix
+There is **no SSO** in CE.
 
-```java
-json.replace("localhost:8082", "localhost:8080")
+### The Identity Mirror Solution
+
+We use **impersonation via a system user**.
+
+```
+User → BFF → ToolJet (as admin)
 ```
 
-This ensures:
+ToolJet thinks:
+> "This is the admin doing something."
 
-* All requests remain anchored to BFF
-* No direct ToolJet access
+The BFF ensures:
+* User only sees **allowed apps**
+* User cannot escape sandbox
+
+### Why This Is Safe
+
+* ToolJet is not public
+* Admin session never reaches browser
+* Authorization is enforced **before** proxying
+
+This pattern is commonly called:
+* *Headless Admin*
+* *Service Account Impersonation*
+* *Trusted Proxy Auth*
 
 ---
 
@@ -258,8 +341,6 @@ This ensures:
 * Session is internal only
 * ToolJet is not exposed
 
----
-
 ### Login Endpoint Used
 
 ```
@@ -268,9 +349,7 @@ POST /api/authenticate/{organizationId}
 
 Payload mirrors browser login exactly.
 
----
-
-## 🔄 Session Retry Logic
+### Session Retry Logic
 
 If ToolJet responds with `401`:
 
@@ -281,9 +360,83 @@ retry request once
 ```
 
 This handles:
-
 * Session expiry
 * ToolJet restarts
+
+---
+
+## 🧠 URL Synchronization (Why It Exists)
+
+### The Path Crisis (React Router Reality)
+
+ToolJet is an SPA. ToolJet boots its engine only if:
+
+```
+window.location.pathname === /applications/{uuid}
+```
+
+### Why Our URL Breaks It
+
+Initial iframe URL:
+
+```
+/tooljet/ticket/{uuid}/applications/{appId}
+```
+
+To ToolJet:
+* Unknown prefix
+* Looks like a nested app
+* Router never activates
+
+Result:
+* White screen
+* No console errors
+
+### The History Rewrite Fix
+
+We inject a script:
+
+```html
+<script>
+window.history.replaceState({}, '', '/applications/{uuid}');
+</script>
+```
+
+Injected script effect:
+* URL becomes familiar
+* ToolJet router initializes
+* SPA lifecycle resumes
+
+This is **intentional URL normalization**.
+
+Without this:
+* White screen
+* No errors
+* ToolJet never boots
+
+---
+
+## 🔁 JSON Host Rewriting
+
+### The Core Problem
+
+ToolJet returns configuration JSON containing:
+
+```
+localhost:8082
+```
+
+This would bypass the BFF.
+
+### Fix
+
+```java
+json.replace("localhost:8082", "localhost:8080")
+```
+
+This ensures:
+* All requests remain anchored to BFF
+* No direct ToolJet access
 
 ---
 
@@ -296,11 +449,8 @@ SessionCreationPolicy.STATELESS
 ```
 
 Ensures:
-
 * No server memory for users
 * JWT remains authoritative
-
----
 
 ### Wristband Exception Rule
 
@@ -309,11 +459,8 @@ If TJ_BFF_SESSION cookie exists → permit
 ```
 
 Why:
-
 * Assets & APIs cannot send JWT
 * Cookie is validated inside controller
-
----
 
 ### Negative Header Match
 
@@ -322,7 +469,6 @@ headers = "!Authorization"
 ```
 
 Prevents:
-
 * Accidental proxying of InfinityPlus APIs
 * ToolJet hijacking application endpoints
 
@@ -345,27 +491,20 @@ Prevents:
 ### White Screen
 
 Check:
-
 * `/api/config` response
 * Injected history script
 * iframe container height
 
----
-
 ### 401 from ToolJet
 
 Check:
-
 * System credentials
 * Organization ID
 * ToolJet logs
 
----
-
 ### Assets Not Loading
 
 Check:
-
 * BFF origin
 * Cookie present
 * Path rewriting
@@ -394,6 +533,32 @@ app.frontend.url=http://localhost:5173
 
 ---
 
+## 📊 Direct vs Ticketed – Final Comparison
+
+| Feature          | Direct ToolJet Access | Ticketed BFF Proxy |
+| ---------------- | --------------------- | ------------------ |
+| Authentication   | ❌ Fails               | ✅ Works            |
+| JWT Support      | ❌ None                | ✅ Preserved        |
+| Asset Loading    | ❌ Breaks              | ✅ Continuous       |
+| Login UX         | ❌ Double login        | ✅ Seamless         |
+| ToolJet Exposure | ❌ Public              | ✅ Hidden           |
+| Security Model   | ❌ Weak                | ✅ Defense-in-depth |
+
+---
+
+## 🏁 Why This Architecture Is "Correct"
+
+This design:
+* Accepts browser limitations
+* Uses each auth mechanism where it fits
+* Keeps ToolJet CE unchanged
+* Preserves JWT authority
+* Prevents accidental data leaks
+
+There is **no simpler secure solution** for ToolJet CE embedding.
+
+---
+
 ## 🏁 Final Notes for Future Maintainers
 
 * **Do not expose ToolJet directly**
@@ -413,5 +578,3 @@ This architecture is intentional, defensive, and production‑grade for ToolJet 
 * Add audit logs
 
 ---
-
-**End of README**

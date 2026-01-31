@@ -24,9 +24,9 @@ public class ToolJetAuthService {
     private final RestTemplate restTemplate = new RestTemplate();
     @Value("${tooljet.internal.url:http://localhost:8082}")
     private String tooljetUrl;
-    @Value("rishavj0212@gmail.com")
+    @Value("${tooljet.admin.email}")
     private String systemEmail;
-    @Value("02122002@Rj")
+    @Value("${tooljet.admin.password}")
     private String systemPassword;
     @Value("${tooljet.organization.id}")
     private String organizationId;

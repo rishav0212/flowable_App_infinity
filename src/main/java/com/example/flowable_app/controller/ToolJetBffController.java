@@ -134,8 +134,6 @@ public class ToolJetBffController {
     private ResponseEntity<byte[]> forwardRequest(String path, HttpServletRequest request, String userEmail, byte[] body) {
         String correctOrgId = "d776c8cf-3808-4a91-9525-6b0982f8b4d3";
 
-        log.info(path);
-
         // 1. Build the target URI
         URI targetUri = UriComponentsBuilder.fromHttpUrl(tooljetUrl)
                 .path(path)
@@ -144,13 +142,19 @@ public class ToolJetBffController {
                 .queryParam("current_user_email", userEmail)
                 .build(true).toUri();
 
-        // 2. Prepare Headers (Mirroring the environment)
+        // 2. Prepare Request Headers
         HttpHeaders headers = new HttpHeaders();
         headers.add(HttpHeaders.COOKIE, authService.getToolJetSession());
         headers.add("tj-workspace-id", correctOrgId);
         headers.add("x-tooljet-workspace-id", correctOrgId);
         headers.add("X-Forwarded-Host", "localhost:8080");
         headers.add("X-Forwarded-Proto", "http");
+
+        // ✅ ADDED: Pass through 'If-None-Match' to ToolJet for ETag validation
+        String ifNoneMatch = request.getHeader(HttpHeaders.IF_NONE_MATCH);
+        if (ifNoneMatch != null) {
+            headers.add(HttpHeaders.IF_NONE_MATCH, ifNoneMatch);
+        }
 
         if (request.getContentType() != null) {
             headers.setContentType(MediaType.parseMediaType(request.getContentType()));
@@ -164,6 +168,11 @@ public class ToolJetBffController {
                 byte[].class
         );
 
+        // ✅ PERFORMANCE FIX: Handle 304 Not Modified from ToolJet
+        if (tooljetRes.getStatusCode() == HttpStatus.NOT_MODIFIED) {
+            return new ResponseEntity<>(null, tooljetRes.getHeaders(), HttpStatus.NOT_MODIFIED);
+        }
+
         byte[] responseBody = tooljetRes.getBody();
 
         // 4. THE MIRROR: Rewrite any internal URLs in JSON responses
@@ -176,19 +185,35 @@ public class ToolJetBffController {
             }
         }
 
-        // 5. Cleanup Security Headers
+        // 5. Cleanup Security Headers & Preserve Performance Headers
         HttpHeaders resHeaders = new HttpHeaders();
-        resHeaders.setContentType(tooljetRes.getHeaders().getContentType());
+
+        // ✅ FIX: Copy essential performance headers back to the browser
+        if (tooljetRes.getHeaders().getContentType() != null) {
+            resHeaders.setContentType(tooljetRes.getHeaders().getContentType());
+        }
+        if (tooljetRes.getHeaders().getETag() != null) {
+            resHeaders.setETag(tooljetRes.getHeaders().getETag());
+        }
+        if (tooljetRes.getHeaders().getCacheControl() != null) {
+            resHeaders.setCacheControl(tooljetRes.getHeaders().getCacheControl());
+        }
+        // Required so browser knows how much data to expect
+        if (responseBody != null) {
+            resHeaders.setContentLength(responseBody.length);
+        }
+
+        // Remove restrictive policies
         resHeaders.remove("X-Frame-Options");
         resHeaders.remove("Content-Security-Policy");
         resHeaders.remove("Cross-Origin-Opener-Policy");
         resHeaders.remove("Cross-Origin-Resource-Policy");
 
+        // Add Permissive policies for embedding
         resHeaders.add("X-Frame-Options", "ALLOWALL");
         resHeaders.add("Content-Security-Policy", "frame-ancestors *");
         resHeaders.setAccessControlAllowOrigin("http://localhost:5173");
         resHeaders.setAccessControlAllowCredentials(true);
 
         return new ResponseEntity<>(responseBody, resHeaders, tooljetRes.getStatusCode());
-    }
-}
+    }}
