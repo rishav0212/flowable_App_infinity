@@ -51,7 +51,7 @@ public class GoogleDriveService {
      * @return Authenticated Drive client
      * @throws IOException If authentication fails at all levels.
      */
-    private Drive getDriveService() throws IOException {
+    public Drive getDriveService() throws IOException {
         GoogleCredentials credentials;
 
         // 🟢 Logic: External File vs Internal Resource vs Default
@@ -138,9 +138,37 @@ public class GoogleDriveService {
      * @throws IOException If the file cannot be found or read.
      */
     public InputStream downloadFile(String fileId) throws IOException {
-        log.debug("📥 START: Downloading stream for File ID [{}]", fileId);
         Drive service = getDriveService();
-        return service.files().get(fileId).setSupportsAllDrives(true).executeMediaAsInputStream();
+
+        // 1. Check the file type first
+        File fileMetadata = service.files().get(fileId)
+                .setFields("mimeType, name")
+                .setSupportsAllDrives(true)
+                .execute();
+
+        String mimeType = fileMetadata.getMimeType();
+        log.info("📥 Fetching file [{}] (Type: {})", fileMetadata.getName(), mimeType);
+
+        // 2. Handle Google Docs (Export instead of Download)
+        if ("application/vnd.google-apps.document".equals(mimeType)) {
+            log.info("🔄 Auto-exporting Google Doc to .docx for processing...");
+            return service.files()
+                    .export(fileId, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                    .executeMediaAsInputStream();
+        }
+        // 3. Handle Google Sheets (Export instead of Download)
+        else if ("application/vnd.google-apps.spreadsheet".equals(mimeType)) {
+            log.info("🔄 Auto-exporting Google Sheet to .xlsx for processing...");
+            return service.files()
+                    .export(fileId, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    .executeMediaAsInputStream();
+        }
+        // 4. Handle Regular Files (PDFs, Uploaded .docx, Images)
+        else {
+            return service.files().get(fileId)
+                    .setSupportsAllDrives(true)
+                    .executeMediaAsInputStream();
+        }
     }
 
     /**
