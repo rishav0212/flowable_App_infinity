@@ -1,7 +1,9 @@
 # 🛡️ InfinityPlus – Secure ToolJet BFF Integration (Community Edition)
 
 > **Audience**: Backend engineers, full‑stack engineers, DevOps, future maintainers, security reviewers
+
 > **Purpose**: This document explains **what was built, why it was built, how it works internally, and how to debug it**.
+
 > **Scope**: This is a **complete architectural + implementation README** for the ToolJet Community Edition secure embedding using a Spring Boot **Backend‑for‑Frontend (BFF)**.
 
 ---
@@ -10,7 +12,7 @@
 
 ToolJet Community Edition does **not** support stateless JWT‑based embedding. Browsers also **do not send Authorization headers** for iframe sub‑requests (JS, CSS, internal APIs). Because of this, a naïve JWT‑only approach **breaks immediately** after the first HTML response.
 
-To solve this **correctly and securely**, we implemented a **Ticket → Cookie Promotion BFF Architecture**.
+To solve this **correctly and securely**, we implemented a **Ticket → Opaque Session UUID Promotion BFF Architecture**.
 
 ### In one sentence:
 
@@ -29,19 +31,19 @@ This pattern is used internally by enterprise platforms that embed dashboards, a
   * `/api/v2/queries`
   * `/run/*`
 * ToolJet is a **Single Page Application (SPA)** and depends on these routes.
+* If the backend expects a JWT in the header, these requests will return 401 Unauthorized, causing a "White Screen."
 
 ### 2️⃣ ToolJet Community Edition Limitations
 
 * No native embed JWT support
 * No stateless SSO hooks
-* Expects a logged‑in user (session cookie)
+* Expects a logged‑in user via a standard session cookie
 
 ### 3️⃣ Security Requirements
 
-* ToolJet must **not be public**
-* Users must **not log in again**
-* JWT must remain authoritative
-* No ToolJet cookies must leak to the browser
+* ToolJet must **not be public** (it should live in an internal Docker network reachable only by the BFF)
+* Users must **not log in again** (Seamless SSO)
+* JWT must remain authoritative for the initial "Ticket" handshake
 
 ---
 
@@ -71,9 +73,10 @@ This pattern is used internally by enterprise platforms that embed dashboards, a
 
 ### 🎟️ Ticket
 
-* One‑time
-* Short‑lived (bootstrap only)
-* Protected by JWT
+* **One‑time**: Valid only for the first entry. Once used, it is purged from memory.
+* **Short‑lived**: Bootstrap only (default 60s TTL)
+* **Protected by JWT**: Generated only via a valid `/api/tooljet/embed-ticket` POST call
+* **The Handshake**: It represents the bridge between the JWT world and the Cookie world
 * Never reused
 
 ### 🎫 Wristband (TJ_BFF_SESSION Cookie)
@@ -95,10 +98,6 @@ This pattern is used internally by enterprise platforms that embed dashboards, a
 
 ### Phase 1: Ticket Issuance
 
-The ticket answers one question:
-
-> **"Was this iframe request initiated by an already-authenticated user?"**
-
 ```
 React → POST /api/tooljet/embed-ticket (JWT)
 BFF   → validate JWT
@@ -110,33 +109,9 @@ BFF   → return iframe URL
 * This is the **only place** user identity is trusted
 * Prevents anonymous iframe access
 
-**Ticket Lifecycle**:
-```
-React (JWT) → /api/tooljet/embed-ticket
-BFF validates JWT
-BFF creates UUID ticket
-BFF stores identity temporarily
-```
+### Phase 2: Ticket Promotion (The Handshake)
 
-**Properties**:
-* One-time use
-* Short TTL (≈ 60s)
-* Never exposed again
-
-**Why NOT Email / User ID in URL**:
-```http
-/applications/my-app?email=admin@company.com
-```
-This fails because:
-* Anyone can type it
-* URLs are guessable
-* URLs leak via logs, bookmarks, referers
-
-The **ticket is a secret**, not an identifier.
-
-### Phase 2: Ticket Promotion
-
-On first iframe hit, the **wristband cookie** is issued:
+On the first iframe hit, the **wristband cookie** is issued:
 
 ```
 Browser → GET /tooljet/ticket/{ticket}/applications/{appId}
@@ -262,7 +237,8 @@ This is **not optional**. Any iframe-based SPA must use cookies for continuity.
 
 What happens:
 * Ticket validated
-* Wristband cookie set
+* UUID Session generated and stored in memory map
+* Wristband (opaque UUID) cookie set
 * ToolJet HTML proxied
 * URL synchronized for ToolJet router
 
@@ -309,6 +285,7 @@ User → BFF → ToolJet (as admin)
 ```
 
 ToolJet thinks:
+
 > "This is the admin doing something."
 
 The BFF ensures:
@@ -402,13 +379,6 @@ window.history.replaceState({}, '', '/applications/{uuid}');
 </script>
 ```
 
-Injected script effect:
-* URL becomes familiar
-* ToolJet router initializes
-* SPA lifecycle resumes
-
-This is **intentional URL normalization**.
-
 Without this:
 * White screen
 * No errors
@@ -451,6 +421,7 @@ SessionCreationPolicy.STATELESS
 Ensures:
 * No server memory for users
 * JWT remains authoritative
+* Each request is independently validated
 
 ### Wristband Exception Rule
 
@@ -461,6 +432,7 @@ If TJ_BFF_SESSION cookie exists → permit
 Why:
 * Assets & APIs cannot send JWT
 * Cookie is validated inside controller
+* UUID is looked up in server-side map
 
 ### Negative Header Match
 
@@ -488,7 +460,7 @@ Prevents:
 
 ## 🐞 Debugging Playbook
 
-### White Screen
+### White Screen?
 
 Check:
 * `/api/config` response
@@ -576,5 +548,3 @@ This architecture is intentional, defensive, and production‑grade for ToolJet 
 * Rotate system credentials
 * Support multi‑org routing
 * Add audit logs
-
----

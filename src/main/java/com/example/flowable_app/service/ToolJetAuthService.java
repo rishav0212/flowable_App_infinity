@@ -92,6 +92,27 @@ public class ToolJetAuthService {
         return null;
     }
 
+
+    // 2. Add this map inside the class
+    private final Map<String, String> activeBffSessions = new ConcurrentHashMap<>();
+
+// 3. Add these two methods
+    /**
+     * Generates a random UUID, links it to the email, and stores it in memory.
+     */
+    public String promoteTicketToSession(String email) {
+        String sessionId = UUID.randomUUID().toString();
+        activeBffSessions.put(sessionId, email);
+        log.info("🎫 Issued Wristband UUID: {} for user: {}", sessionId, email);
+        return sessionId;
+    }
+
+    /**
+     * Returns the email associated with a UUID, or null if invalid.
+     */
+    public String getEmailFromSession(String sessionId) {
+        return activeBffSessions.get(sessionId);
+    }
     public record TicketInfo(String userId, String email, String appId, long expiresAt) {
     }
 }

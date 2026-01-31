@@ -68,30 +68,39 @@ public class ToolJetBffController {
             ToolJetAuthService.TicketInfo info = authService.validateTicket(ticket);
             if (info == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
 
-            userEmail = info.email();
+            // 🛑 CHANGE: Instead of email, create a Secure UUID Session
+            String secureSessionId = authService.promoteTicketToSession(info.email());
 
-            // 🛑 FIX: Use 'Lax' and 'secure(false)' for localhost HTTP
-            ResponseCookie cookie = ResponseCookie.from("TJ_BFF_SESSION", userEmail)
+            ResponseCookie cookie = ResponseCookie.from("TJ_BFF_SESSION", secureSessionId)
                     .httpOnly(true)
-                    .secure(false) // Change to true + SameSite=None only for Production HTTPS
+                    .secure(false) // Keep false for localhost HTTP
                     .sameSite("Lax")
                     .path("/")
                     .maxAge(3600)
                     .build();
             response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
 
-            // Extract the clean path: /applications/uuid...
+            userEmail = info.email();
             targetPath = fullPath.substring(fullPath.indexOf("/applications/"));
 
-            // 2. Fetch the ToolJet HTML and inject the "URL Fixer"
-            ResponseEntity<byte[]> tooljetRes = executeProxyWithRetry(targetPath, request, userEmail, body);
-            return injectUrlFixerScript(tooljetRes, targetPath);
+            return injectUrlFixerScript(executeProxyWithRetry(targetPath, request, userEmail, body), targetPath);
         }
 
-        // 3. Subsequent requests (Assets, APIs, JSON)
-        if (userEmail == null) {
+        // 2. Subsequent requests (Assets/APIs)
+        if (bffSession != null) {
+            // 🛑 CHANGE: Look up the real email from the Map using the UUID from the cookie
+            userEmail = authService.getEmailFromSession(bffSession);
+
+            if (userEmail == null) {
+                log.warn("🚨 Invalid or expired TJ_BFF_SESSION: {}", bffSession);
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            }
+            targetPath = fullPath;
+        } else {
+            // 🛑 DENY: No ticket and no session cookie
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
+
 
         return executeProxyWithRetry(targetPath, request, userEmail, body);
     }
@@ -117,6 +126,7 @@ public class ToolJetBffController {
 
         return new ResponseEntity<>(modifiedHtml.getBytes(), response.getHeaders(), response.getStatusCode());
     }
+
     private ResponseEntity<byte[]> executeProxyWithRetry(String path, HttpServletRequest request, String userEmail, byte[] body) {
         try {
             return forwardRequest(path, request, userEmail, body);
@@ -216,4 +226,5 @@ public class ToolJetBffController {
         resHeaders.setAccessControlAllowCredentials(true);
 
         return new ResponseEntity<>(responseBody, resHeaders, tooljetRes.getStatusCode());
-    }}
+    }
+}
