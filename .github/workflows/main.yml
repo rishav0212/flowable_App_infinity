@@ -2,7 +2,7 @@ name: Deploy Backend (From Repo)
 
 on:
   push:
-    branches: "**"
+    branches: main
 
 env:
   PROJECT_ID: myfirsttestproject-456102
