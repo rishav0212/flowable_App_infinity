@@ -1,31 +1,89 @@
-name: Deploy Backend (From Repo)
+name: Deploy Backend (Dynamic Env & Cleanup)
 
 on:
   push:
-    branches: main
+    branches:
+      - main
+      - '**'
 
 env:
   PROJECT_ID: myfirsttestproject-456102
   REGION: asia-south2
-  # 🟢 USING OLDER ARTIFACT REGISTRY (The one that works)
   GAR_LOCATION: asia-south2-docker.pkg.dev/myfirsttestproject-456102/infinity-images
-  SERVICE_NAME: infinity-plus-services
   RUNTIME_SERVICE_ACCOUNT: infinityplus-services-runtime@myfirsttestproject-456102.iam.gserviceaccount.com
 
-
 jobs:
+  # ======================================================
+  # JOB 1: BUILD AND DEPLOY
+  # ======================================================
   build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # Required for Workload Identity
+      id-token: write
+
+    # 🟢 OUTPUTS: Passing variables to the cleanup job
+    outputs:
+      service_name: ${{ steps.define_env.outputs.SERVICE_NAME }}
+      image_name: ${{ steps.define_env.outputs.IMAGE_NAME }}
+      region: ${{ steps.define_env.outputs.REGION }}
 
     steps:
-      # 1. Checkout Code directly from Repo
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Authenticate to Google Cloud (WIF)
+      # --- 1. Define Environment (Dynamic Config) ---
+      - name: Define Environment
+        id: define_env
+        run: |
+          # ---------------- PRODUCTION (MAIN) ----------------
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "✅ Branch is MAIN (Production)"
+          
+            # Service & Image Identity
+            echo "SERVICE_NAME=infinity-plus-services" >> $GITHUB_ENV
+            echo "IMAGE_NAME=infinity-plus-services" >> $GITHUB_ENV
+            echo "IMAGE_TAG=latest" >> $GITHUB_ENV
+
+            # Resource Limits (High Performance)
+            echo "CPU=2" >> $GITHUB_ENV
+            echo "MEMORY=2Gi" >> $GITHUB_ENV
+            echo "MAX_INSTANCES=3" >> $GITHUB_ENV
+
+            # URLs for Production
+            echo "ENV_FRONTEND_URL=https://infinity-plus.saarbiotech.in/" >> $GITHUB_ENV
+            echo "ENV_BACKEND_URL=https://infinity-plus-services-493376716946.asia-south2.run.app" >> $GITHUB_ENV
+
+            # Save Output for next job
+            echo "SERVICE_NAME=infinity-plus-services" >> $GITHUB_OUTPUT
+            echo "IMAGE_NAME=infinity-plus-services" >> $GITHUB_OUTPUT
+
+          # ---------------- DEVELOPMENT (OTHER) ----------------
+          else
+            echo "⚠️ Branch is ${{ github.ref_name }} (Development)"
+          
+            # Service & Image Identity
+            echo "SERVICE_NAME=infinity-plus-services-dev" >> $GITHUB_ENV
+            echo "IMAGE_NAME=infinity-plus-services-dev" >> $GITHUB_ENV
+            echo "IMAGE_TAG=latest" >> $GITHUB_ENV
+
+            # Resource Limits (Cost Saving)
+            echo "CPU=1" >> $GITHUB_ENV
+            echo "MEMORY=1Gi" >> $GITHUB_ENV  # Optional: Lower memory for dev if possible
+            echo "MAX_INSTANCES=1" >> $GITHUB_ENV
+
+            # URLs for Development
+            # 🟢 NOTE: Ensure these URLs exist or change them to the auto-generated Cloud Run URL later
+            echo "ENV_FRONTEND_URL=https://dev.infinity-plus.saarbiotech.in/" >> $GITHUB_ENV
+            echo "ENV_BACKEND_URL=https://infinity-plus-services-dev-493376716946.asia-south2.run.app" >> $GITHUB_ENV
+
+            # Save Output for next job
+            echo "SERVICE_NAME=infinity-plus-services-dev" >> $GITHUB_OUTPUT
+            echo "IMAGE_NAME=infinity-plus-services-dev" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "REGION=${{ env.REGION }}" >> $GITHUB_OUTPUT
+
       - name: Authenticate to Google Cloud
         id: auth
         uses: google-github-actions/auth@v2
@@ -34,11 +92,9 @@ jobs:
           service_account: github-actions-sa-saarbiotech@myfirsttestproject-456102.iam.gserviceaccount.com
           token_format: "access_token"
 
-      # 3. Setup Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 4. Login to Artifact Registry
       - name: Docker Auth
         uses: docker/login-action@v3
         with:
@@ -46,33 +102,30 @@ jobs:
           username: "oauth2accesstoken"
           password: "${{ steps.auth.outputs.access_token }}"
 
-      # 5. Build and Push
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
-          # 🟢 MODIFIED: Points to repository root.
-          # If your Dockerfile is in a subfolder, change '.' to './folder-name'
           context: .
           push: true
-          tags: ${{ env.GAR_LOCATION }}/infinity-plus-services:latest
+          tags: ${{ env.GAR_LOCATION }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # 6. Deploy to Cloud Run
+      # --- 2. Deploy with Dynamic Variables ---
       - name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.SERVICE_NAME }}
           region: ${{ env.REGION }}
-          image: ${{ env.GAR_LOCATION }}/infinity-plus-services:latest
+          image: ${{ env.GAR_LOCATION }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           flags: |
             --allow-unauthenticated
             --port=8080
             --service-account=${{ env.RUNTIME_SERVICE_ACCOUNT }}
             --add-cloudsql-instances=myfirsttestproject-456102:asia-south2:infinity-production
-            --memory=2Gi
-            --cpu=2
-            --max-instances=3
+            --memory=${{ env.MEMORY }}
+            --cpu=${{ env.CPU }}
+            --max-instances=${{ env.MAX_INSTANCES }}
             --timeout=1000s
             --cpu-boost
           env_vars: |
@@ -80,16 +133,81 @@ jobs:
             SPRING_CLOUD_GCP_SQL_INSTANCE_CONNECTION_NAME=myfirsttestproject-456102:asia-south2:infinity-production
             SPRING_DATASOURCE_USERNAME=infinity-flowable-test
             SPRING_FORMIO_URL=https://infinity-formio-server-493376716946.asia-south2.run.app
-            SPRING_APP_FRONTEND_URL=https://infinity-plus.saarbiotech.in/
             SPRING_FORMIO_ADMIN_EMAIL=admin@example.com
             SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_ID=493376716946-ttnbp0o0mfp8tig8p62ittp2tb5q9coe.apps.googleusercontent.com
             SPRING_CLOUD_GCP_CREDENTIALS_LOCATION=
-            SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_REDIRECT_URI=https://infinity-plus-services-493376716946.asia-south2.run.app/login/oauth2/code/google
+            SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_REDIRECT_URI=${{ env.ENV_BACKEND_URL }}/login/oauth2/code/google
             SERVER_FORWARD_HEADERS_STRATEGY=framework
-            SPRING_APP_BACKEND_URL=https://infinity-plus-services-493376716946.asia-south2.run.app
+            SPRING_APP_FRONTEND_URL=${{ env.ENV_FRONTEND_URL }}
+            SPRING_APP_BACKEND_URL=${{ env.ENV_BACKEND_URL }}
           secrets: |
             SPRING_DATASOURCE_PASSWORD=INFINITY_DB_PASSWORD:latest
             SPRING_FORMIO_ADMIN_PASSWORD=INFINITY_FORMIO_ADMIN_KEY:latest
             SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_SECRET=INFINITY_GOOGLE_CLIENT_SECRET:latest
             SPRING_APP_JWT_SECRET=INFINITY_JWT_SIGNING_KEY:latest
             /app/secrets/drive-sa-key.json=infinityplus-gdrive-connector-key:latest
+
+  # ======================================================
+  # JOB 2: CLEANUP DEV RESOURCES
+  # ======================================================
+  cleanup-dev:
+    if: github.ref_name != 'main'
+    needs: build-and-deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/493376716946/locations/global/workloadIdentityPools/github-wif-pool/providers/github-provider-3
+          service_account: github-actions-sa-saarbiotech@myfirsttestproject-456102.iam.gserviceaccount.com
+          token_format: "access_token"
+
+      # 1. Delete Untagged Images (Dev Folder Only)
+      - name: Delete Untagged Images
+        run: |
+          IMAGE_NAME="${{ needs.build-and-deploy.outputs.image_name }}"
+          FULL_IMAGE_PATH="${{ env.GAR_LOCATION }}/$IMAGE_NAME"
+          
+          echo "🧹 Cleaning untagged images in: $FULL_IMAGE_PATH"
+          
+          UNTAGGED_DIGESTS=$(gcloud artifacts docker images list "$FULL_IMAGE_PATH" \
+            --include-tags \
+            --filter='-tags:*' \
+            --format="value(digest)")
+
+          if [ -z "$UNTAGGED_DIGESTS" ]; then
+            echo "No untagged images found."
+          else
+            for digest in $UNTAGGED_DIGESTS; do
+              echo "Deleting $digest..."
+              gcloud artifacts docker images delete "$FULL_IMAGE_PATH@$digest" \
+              --delete-tags --quiet
+            done
+          fi
+
+      # 2. Prune Cloud Run Revisions (Dev Service Only)
+      - name: Prune Old Cloud Run Revisions
+        run: |
+          SERVICE_NAME="${{ needs.build-and-deploy.outputs.service_name }}"
+          REGION="${{ needs.build-and-deploy.outputs.region }}"
+          
+          echo "🧹 Pruning old revisions for: $SERVICE_NAME"
+          
+          REVISIONS_TO_DELETE=$(gcloud run revisions list \
+            --service "$SERVICE_NAME" \
+            --region "$REGION" \
+            --format="value(name)" \
+            --sort-by="metadata.creationTimestamp" | head -n -2)
+
+          if [ -z "$REVISIONS_TO_DELETE" ]; then
+             echo "No old revisions to delete."
+          else
+             for rev in $REVISIONS_TO_DELETE; do
+               echo "Deleting revision $rev..."
+               gcloud run revisions delete "$rev" --region "$REGION" --quiet
+             done
+          fi
