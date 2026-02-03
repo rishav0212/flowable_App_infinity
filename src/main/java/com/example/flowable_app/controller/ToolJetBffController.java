@@ -1,5 +1,6 @@
 package com.example.flowable_app.controller;
 
+import com.example.flowable_app.service.AllowedUserService;
 import com.example.flowable_app.service.ToolJetAuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -22,6 +23,7 @@ import java.util.Map;
 public class ToolJetBffController {
 
     private final ToolJetAuthService authService;
+    private final AllowedUserService userService;
     private final RestTemplate restTemplate = new RestTemplate();
     @Value("${tooljet.internal.url:http://localhost:8082}")
     private String tooljetUrl; // ✅ Use the property, not hardcoded string
@@ -59,7 +61,7 @@ public class ToolJetBffController {
             HttpServletResponse response,
             @CookieValue(name = "TJ_BFF_SESSION", required = false) String bffSession) {
 
-        String userEmail = bffSession;
+        String userEmail;
         String fullPath = request.getRequestURI();
         String targetPath = fullPath;
 
@@ -68,12 +70,15 @@ public class ToolJetBffController {
             ToolJetAuthService.TicketInfo info = authService.validateTicket(ticket);
             if (info == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
 
-            // 🛑 CHANGE: Instead of email, create a Secure UUID Session
             String secureSessionId = authService.promoteTicketToSession(info.email());
+
+            // --- ADD THIS LOGIC ---
+            // Fetch the real ID to sync it with the frontend URL
+            String verifiedId = userService.getUserIdByEmail(info.email());
 
             ResponseCookie cookie = ResponseCookie.from("TJ_BFF_SESSION", secureSessionId)
                     .httpOnly(true)
-                    .secure(false) // Keep false for localhost HTTP
+                    .secure(false)
                     .sameSite("Lax")
                     .path("/")
                     .maxAge(3600)
@@ -81,9 +86,15 @@ public class ToolJetBffController {
             response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
 
             userEmail = info.email();
-            targetPath = fullPath.substring(fullPath.indexOf("/applications/"));
 
-            return injectUrlFixerScript(executeProxyWithRetry(targetPath, request, userEmail, body), targetPath);
+            // Construct the path that includes the userId for the browser
+            // Result: /applications/<app-id>?userId= ?
+            String cleanPathForBrowser = fullPath.substring(fullPath.indexOf("/applications/"))
+                    + "?userId=" + verifiedId;
+
+            // Use the modified path for the script injection
+            return injectUrlFixerScript(executeProxyWithRetry(targetPath, request, userEmail, body),
+                    cleanPathForBrowser);
         }
 
         // 2. Subsequent requests (Assets/APIs)
@@ -149,7 +160,6 @@ public class ToolJetBffController {
                 .path(path)
                 .query(request.getQueryString())
                 .replaceQueryParam("workspaceSlug", correctOrgId)
-                .queryParam("current_user_email", userEmail)
                 .build(true).toUri();
 
         // 2. Prepare Request Headers
@@ -224,7 +234,6 @@ public class ToolJetBffController {
         resHeaders.add("Content-Security-Policy", "frame-ancestors *");
         resHeaders.setAccessControlAllowOrigin("http://localhost:5173");
         resHeaders.setAccessControlAllowCredentials(true);
-
         return new ResponseEntity<>(responseBody, resHeaders, tooljetRes.getStatusCode());
     }
 }

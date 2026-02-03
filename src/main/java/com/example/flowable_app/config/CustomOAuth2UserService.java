@@ -28,12 +28,12 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         String email = googleUser.getAttribute("email");
         log.info("🌐 Google Auth: Received email [{}] from Google", email); // 👈 Added
 
-        String internalUserId = allowedUserService.getUserIdByEmail(email)
-                .orElseThrow(() -> {
-                    log.error("🚫 Access Denied: Email [{}] not found in allowed mapping table", email); // 👈 Added
-                    return new OAuth2AuthenticationException(new OAuth2Error("access_denied"),
-                            "Email [" + email + "] is not mapped.");
-                });
+        String internalUserId = allowedUserService.getUserIdByEmail(email);
+        if (internalUserId == null) {
+            log.error("🚫 Access Denied: Email [{}] not found in allowed mapping table", email); // 👈 Added
+            throw new OAuth2AuthenticationException(new OAuth2Error("access_denied"),
+                    "Email [" + email + "] is not mapped.");
+        }
 
         Map<String, Object> attributes = new HashMap<>(googleUser.getAttributes());
         attributes.put("internalId", internalUserId);

@@ -15,7 +15,7 @@ import static org.jooq.impl.DSL.table;
 public class AllowedUserService {
     private final DSLContext dsl;
 
-    public Optional<String> getUserIdByEmail(String email) {
+    public String getUserIdByEmail(String email) {
         log.info("🔍 Database Lookup: Searching for USER_ID mapping for email: [{}]", email); // 👈 Added
 
         Record1<Object> result = dsl.select(field("USER_ID"))
@@ -25,11 +25,11 @@ public class AllowedUserService {
 
         if (result == null) {
             log.warn("❌ Database Lookup: No mapping found for email: [{}]", email); // 👈 Added
-            return Optional.empty();
+            return null;
         }
 
         String mappedId = result.value1().toString();
         log.info("✅ Database Lookup: Found mapping. Email [{}] -> USER_ID [{}]", email, mappedId); // 👈 Added
-        return Optional.of(mappedId);
+        return mappedId;
     }
 }
