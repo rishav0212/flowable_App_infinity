@@ -6,6 +6,7 @@ import com.example.flowable_app.dto.TaskSubmitDto;
 import com.example.flowable_app.service.DataMirrorService;
 import com.example.flowable_app.service.FormSchemaService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -26,6 +27,7 @@ import org.flowable.task.api.history.HistoricTaskInstance;
 import org.flowable.variable.api.history.HistoricVariableInstance;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.InputStream;
@@ -484,5 +486,89 @@ public class TaskOperationController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to fetch highlights"));
         }
+    }
+
+    // =========================================================================
+    // 🟢 NEW: SERVER-SIDE BATCH PROCESSING
+    // =========================================================================
+
+    @Operation(
+            summary = "Batch Start Process Instances",
+            description = "Accepts a list of variable maps and starts a process instance for each item. \n" +
+                    "Executes on the server for high performance. Returns a summary of successes and failures."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Batch processing complete (check body for individual errors)"),
+            @ApiResponse(responseCode = "500", description = "Critical server failure")
+    })
+    @PostMapping("/process/{processDefinitionKey}/batch-start")
+    public ResponseEntity<?> batchStartProcess(
+            @Parameter(description = "Key of the process to start (e.g. 'hiringProcess')", required = true)
+            @PathVariable String processDefinitionKey,
+            @RequestBody List<Map<String, Object>> batchData,
+            Authentication authentication
+    ) {
+        log.info("🚀 BATCH START: Received [{}] items for process [{}]", batchData.size(), processDefinitionKey);
+
+        // 1. Extract User ID safely to set as 'initiator'
+        String userId = "batch-runner";
+        if (authentication != null && authentication.getPrincipal() instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> claims = (Map<String, Object>) authentication.getPrincipal();
+            userId = (String) claims.get("id");
+        }
+
+        int successCount = 0;
+        int failCount = 0;
+        List<String> logs = new ArrayList<>();
+
+        // 2. Server-Side Loop
+        for (int i = 0; i < batchData.size(); i++) {
+            Map<String, Object> variables = batchData.get(i);
+            try {
+                // 1. Extract Business Key if present (and remove from vars to avoid duplication)
+                String businessKey = null;
+                if (variables.containsKey("businessKey")) {
+
+                    businessKey = String.valueOf(variables.get("businessKey"));
+                    variables.remove("businessKey");
+                }
+
+                // 2. Set Metadata
+                variables.put("initiator", userId);
+                variables.put("batchSource", "api-upload");
+
+                // 3. Start Instance (Handle both cases)
+                ProcessInstance instance;
+                if (businessKey != null && !businessKey.isEmpty()) {
+                    // 🟢 Start WITH Business Key
+                    instance = runtimeService.startProcessInstanceByKey(processDefinitionKey, businessKey, variables);
+                } else {
+                    // ⚪ Start WITHOUT Business Key
+                    instance = runtimeService.startProcessInstanceByKey(processDefinitionKey, variables);
+                }
+
+                successCount++;                // Optional: Reduce log noise for large batches
+                if (batchData.size() < 100) {
+                    logs.add("✅ Row " + (i + 1) + ": Started (ID: " + instance.getId() + ")");
+                }
+
+            } catch (Exception e) {
+                failCount++;
+                log.error("❌ BATCH ROW [{}] FAILED: {}", i + 1, e.getMessage());
+                logs.add("❌ Row " + (i + 1) + " Failed: " + e.getMessage());
+            }
+        }
+
+        // 3. Construct Summary Response
+        Map<String, Object> response = new HashMap<>();
+        response.put("total", batchData.size());
+        response.put("success", successCount);
+        response.put("failed", failCount);
+        response.put("logs", logs);
+
+        log.info("🏁 BATCH COMPLETE: {} Success, {} Failed", successCount, failCount);
+
+        return ResponseEntity.ok(response);
     }
 }

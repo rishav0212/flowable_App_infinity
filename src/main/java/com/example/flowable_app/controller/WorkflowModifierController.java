@@ -2,9 +2,11 @@ package com.example.flowable_app.controller;
 
 import lombok.extern.slf4j.Slf4j;
 import org.flowable.bpmn.model.*;
+import org.flowable.engine.HistoryService;
 import org.flowable.engine.ProcessMigrationService;
 import org.flowable.engine.RepositoryService;
 import org.flowable.engine.RuntimeService;
+import org.flowable.engine.history.HistoricProcessInstance;
 import org.flowable.engine.repository.ProcessDefinition;
 import org.flowable.engine.runtime.ProcessInstance;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +31,8 @@ public class WorkflowModifierController {
 
     @Autowired
     private ProcessMigrationService processMigrationService;
+    @Autowired
+    private HistoryService historyService;
 
     /**
      * 🟢 MIGRATE INSTANCES (Fixed Builder Logic)
@@ -162,6 +166,51 @@ public class WorkflowModifierController {
             log.error("❌ MODIFIER ERROR: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to modify workflow", "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * 🟢 PURGE DATA ENDPOINT
+     * Deletes ALL running and historic instances for a specific process key (all versions).
+     * Keeps the definition (BPMN) intact.
+     */
+    @DeleteMapping("/purge/{processKey}")
+    public ResponseEntity<?> purgeWorkflowData(@PathVariable String processKey) {
+        log.info("🔥 PURGE REQUEST: Wiping all data for Process Key: [{}]", processKey);
+
+        try {
+            // 1. Delete Running Instances (Active)
+            List<ProcessInstance> runningInstances = runtimeService.createProcessInstanceQuery()
+                    .processDefinitionKey(processKey)
+                    .list();
+
+            int runningCount = runningInstances.size();
+            for (ProcessInstance pi : runningInstances) {
+                runtimeService.deleteProcessInstance(pi.getId(), "Admin Purge Request");
+            }
+
+            // 2. Delete Historic Instances (Completed/Cancelled)
+            List<HistoricProcessInstance> historicInstances = historyService.createHistoricProcessInstanceQuery()
+                    .processDefinitionKey(processKey)
+                    .list();
+
+            int historyCount = historicInstances.size();
+            for (HistoricProcessInstance hpi : historicInstances) {
+                historyService.deleteHistoricProcessInstance(hpi.getId());
+            }
+
+            log.info("✅ PURGE COMPLETE: Deleted {} active and {} historic instances.", runningCount, historyCount);
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Purge Successful",
+                    "deletedActive", runningCount,
+                    "deletedHistory", historyCount
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ PURGE FAILED: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to purge data", "details", e.getMessage()));
         }
     }
 }
