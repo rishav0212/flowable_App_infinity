@@ -28,11 +28,16 @@ public class FlowableDataService {
 
     // Regex to find named parameters like :myParam
     private static final Pattern NAMED_PARAM_PATTERN = Pattern.compile("(?<!:):([a-zA-Z0-9_]+)");
-    private final DSLContext dsl;
+    // Flowable / engine internal tables — NEVER accessible from low-code DSL
+    private static final String[] SYSTEM_TABLE_PREFIXES = {
+            "ACT_",
+            "FLW_"
+    };
 
     // =========================================================================
     // 📖 READ OPERATIONS
     // =========================================================================
+    private final DSLContext dsl;
 
     public Object selectVal(String tableRef, String columnName, String conditionSql, Map<String, Object> params) {
         try {
@@ -77,6 +82,10 @@ public class FlowableDataService {
         }
     }
 
+    // =========================================================================
+    // ✍️ WRITE OPERATIONS
+    // =========================================================================
+
     public boolean exists(String tableRef, String conditionSql, Map<String, Object> params) {
         try {
             SqlAndBindings parsed = parseNamedParams(conditionSql, params);
@@ -91,10 +100,6 @@ public class FlowableDataService {
         }
     }
 
-    // =========================================================================
-    // ✍️ WRITE OPERATIONS
-    // =========================================================================
-
     public int update(String tableRef, String conditionSql, Map<String, Object> params, Object... keyValuePairs) {
         try {
             Map<Field<?>, Object> jooqUpdates = new HashMap<>();
@@ -105,14 +110,18 @@ public class FlowableDataService {
             SqlAndBindings parsed = parseNamedParams(conditionSql, params);
 
             return dsl.update(resolveTable(tableRef))
-                            .set(jooqUpdates)
-                            .where(DSL.condition(parsed.sql, parsed.bindings))
+                    .set(jooqUpdates)
+                    .where(DSL.condition(parsed.sql, parsed.bindings))
                     .execute();
         } catch (Exception e) {
             log.error("update error on table [{}]: {}", tableRef, e.getMessage());
             throw new RuntimeException("Database update failed: " + e.getMessage());
         }
     }
+
+    // =========================================================================
+    // 🧠 INTERNAL HELPERS
+    // =========================================================================
 
     public int insert(String tableRef, Object... keyValuePairs) {
         try {
@@ -126,10 +135,6 @@ public class FlowableDataService {
             throw new RuntimeException("Database insert failed: " + e.getMessage());
         }
     }
-
-    // =========================================================================
-    // 🧠 INTERNAL HELPERS
-    // =========================================================================
 
     private Map<String, Object> toMap(Object... args) {
         Map<String, Object> map = new HashMap<>();
@@ -151,16 +156,18 @@ public class FlowableDataService {
             throw new FlowableIllegalArgumentException("Table name cannot be empty");
         }
 
-        String normalized = inputName.trim().toUpperCase();
+        // "myTable" is not the same as "MYTABLE" in Postgres if quoted.
+        String normalized = inputName.trim();
 
-        // 🚫 Block Flowable / system tables
+        // Update the check to be case-insensitive safe
         for (String prefix : SYSTEM_TABLE_PREFIXES) {
-            if (normalized.startsWith(prefix)) {
+            if (normalized.toUpperCase().startsWith(prefix)) {
                 throw new FlowableIllegalArgumentException(
                         "Access to system table '" + inputName + "' is forbidden"
                 );
             }
         }
+
 
         // Handle schema-qualified tables (schema.table)
         if (inputName.contains(".")) {
@@ -172,7 +179,6 @@ public class FlowableDataService {
 
         return DSL.table(DSL.name(inputName));
     }
-
 
     private SqlAndBindings parseNamedParams(String sql, Map<String, Object> params) {
         if (params == null || params.isEmpty() || sql == null) {
@@ -207,11 +213,5 @@ public class FlowableDataService {
             this.bindings = bindings;
         }
     }
-
-    // Flowable / engine internal tables — NEVER accessible from low-code DSL
-    private static final String[] SYSTEM_TABLE_PREFIXES = {
-            "ACT_",
-            "FLW_"
-    };
 
 }
