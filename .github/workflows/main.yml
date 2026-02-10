@@ -74,7 +74,7 @@ jobs:
 
             # URLs for Development
             # 🟢 NOTE: Ensure these URLs exist or change them to the auto-generated Cloud Run URL later
-            echo "ENV_FRONTEND_URL=https://infinity-plus-saar-1dkoe0jfy-rishav-jindals-projects.vercel.app/" >> $GITHUB_ENV
+            echo "ENV_FRONTEND_URL=https://infinity-plus-saar-git-developer-ed048f-rishav-jindals-projects.vercel.app/" >> $GITHUB_ENV
             echo "ENV_BACKEND_URL=https://infinity-plus-services-dev-493376716946.asia-south2.run.app" >> $GITHUB_ENV
 
             # Save Output for next job
