@@ -10,11 +10,12 @@ import org.springframework.stereotype.Component;
 
 import java.security.Key;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 @Component
 public class JwtUtils {
-    private static final long EXPIRATION_MS = 3*86400000;
-    // ⚠️ In production, put this in application.properties
+    private static final long EXPIRATION_MS = 30L*86000000;     // 10 days
     @Value("${app.jwt.secret}")
     private String secret;
     private Key key;
@@ -26,11 +27,15 @@ public class JwtUtils {
     }
 
 
-    public String generateToken(String internalId, String email, String name) {
+    public String generateToken(String internalId, String email, String name, String tenantId) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("id", internalId);
+        claims.put("name", name);
+        claims.put("tenantId", tenantId); // 🟢 Store Tenant ID
+
         return Jwts.builder()
+                .setClaims(claims) // Use setClaims to add the map
                 .setSubject(email)
-                .claim("id", internalId)
-                .claim("name", name)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION_MS))
                 .signWith(key, SignatureAlgorithm.HS256)

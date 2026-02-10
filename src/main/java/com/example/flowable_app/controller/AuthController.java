@@ -54,6 +54,7 @@ public class AuthController {
             String userId = (String) details.get("id");
             String email = (String) details.get("email");
             String name = (String) details.get("name");
+            String tenantId = (String) details.get("tenantId");
 
             log.info("👤 [Auth] Profile retrieved successfully for User: [{}] ({})", userId, email);
 
@@ -63,6 +64,7 @@ public class AuthController {
                     "id", userId,
                     "email", email,
                     "name", name,
+                    "tenantId", tenantId,
                     "authorities", List.of(Map.of("authority", "ROLE_USER")),
                     "authenticated", true
             ));

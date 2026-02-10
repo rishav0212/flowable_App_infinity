@@ -1,6 +1,7 @@
 package com.example.flowable_app.config;
 
 import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -10,6 +11,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
@@ -91,7 +93,18 @@ public class SecurityConfig {
                 )
 
                 // 🛑 3. SCAN JWT ON EVERY REQUEST
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+
+                .addFilterBefore((request, response, chain) -> {
+                    HttpServletRequest req = (HttpServletRequest) request;
+                    if (req.getRequestURI().startsWith("/oauth2/authorization")) {
+                        String tenantId = req.getParameter("tenantId");
+                        if (tenantId != null) {
+                            req.getSession().setAttribute("WORKFLOW_TENANT", tenantId);
+                        }
+                    }
+                    chain.doFilter(request, response);
+                }, OAuth2AuthorizationRequestRedirectFilter.class);
 
         return http.build();
     }

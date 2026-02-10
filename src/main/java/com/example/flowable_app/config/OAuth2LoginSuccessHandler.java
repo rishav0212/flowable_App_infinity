@@ -2,6 +2,7 @@ package com.example.flowable_app.config;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,7 +35,17 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
         log.info("🎟️ Token Minting: Generating JWT for Subject: [{}]", internalId); // 👈 Added
         String email = oAuth2User.getAttribute("email");
         String name = oAuth2User.getAttribute("name");
-        String token = jwtUtils.generateToken(internalId, email, name);
+        String tenantId = "";
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            String sessionTenant = (String) session.getAttribute("WORKFLOW_TENANT");
+            if (sessionTenant != null) {
+                tenantId = sessionTenant;
+                log.info("💾 Found Tenant in Session: {}", tenantId);
+                session.removeAttribute("WORKFLOW_TENANT"); // Clean up
+            }
+        }
+        String token = jwtUtils.generateToken(internalId, email, name, tenantId);
         log.info("🚀 Redirecting to frontend with newly minted token for user [{}]", internalId); // 👈 Added
 
         String targetUrl = UriComponentsBuilder.fromUriString(frontendUrl + "/oauth2/redirect")

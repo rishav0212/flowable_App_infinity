@@ -52,11 +52,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                 // 🟢 3. Explicitly tell Flowable "This is the user ID"
                 Authentication.setAuthenticatedUserId(userId);
-
                 Map<String, Object> userDetails = Map.of(
                         "id", claims.get("id"),
                         "name", claims.get("name"),
-                        "email", claims.getSubject()
+                        "email", claims.getSubject(),
+                        "tenantId", claims.get("tenantId")
                 );
 
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
