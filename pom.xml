@@ -131,11 +131,7 @@
             <artifactId>js</artifactId>
             <version>23.0.1</version>
         </dependency>
-        <dependency>
-            <groupId>org.graalvm.js</groupId>
-            <artifactId>js-scriptengine</artifactId>
-            <version>23.0.1</version>
-        </dependency>
+
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-config</artifactId>

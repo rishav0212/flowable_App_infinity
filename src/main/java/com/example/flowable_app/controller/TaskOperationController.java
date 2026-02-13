@@ -5,8 +5,8 @@ import com.example.flowable_app.dto.TaskRenderDto;
 import com.example.flowable_app.dto.TaskSubmitDto;
 import com.example.flowable_app.service.DataMirrorService;
 import com.example.flowable_app.service.FormSchemaService;
+import com.example.flowable_app.service.UserContextService;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -32,11 +32,14 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
+/**
+ * 🟢 SECURE TASK OPERATIONS CONTROLLER
+ * This controller serves as the secure BFF (Backend-for-Frontend) for all Flowable interactions.
+ * It enforces multi-tenancy and user-level authorization to prevent cross-user data leaks
+ * within the same tenant and across different tenants.
+ */
 @RestController
 @RequestMapping("/api/workflow")
 @RequiredArgsConstructor
@@ -53,9 +56,100 @@ public class TaskOperationController {
     private final RepositoryService repositoryService;
     private final DataMirrorService dataMirrorService;
     private final FormSchemaService formSchemaService;
+    private final UserContextService userContextService;
 
     // =========================================================================
-    // 1. RENDER ENDPOINT
+    // 🟢 NEW: SECURE INBOX (Replaces fetchTasks in api.ts)
+    // =========================================================================
+    @Operation(
+            summary = "Get User Inbox",
+            description =
+                    "Fetches all tasks currently assigned to the authenticated user or offered to them as a candidate. " +
+                            "Strictly filters by the user's Token ID and Tenant ID."
+    )
+    @GetMapping("/my-tasks")
+    public ResponseEntity<?> getMyTasks(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10000") int size
+    ) {
+
+        String userId = userContextService.getCurrentUserId();     // 🔒 Securely fetched from JWT
+        String tenantId = userContextService.getCurrentTenantId(); // 🔒 Securely fetched from JWT
+
+        log.info("mailbox: Fetching tasks for user [{}] in tenant [{}]", userId, tenantId);
+
+        // 🔒 SECURITY: We force the filter to the current user and tenant
+        List<Task> tasks = taskService.createTaskQuery()
+                .taskCandidateOrAssigned(userId)
+                .taskTenantId(tenantId)
+                .orderByTaskCreateTime().desc()
+                .listPage(page * size, size);
+
+//        List<Map<String, Object>> response = tasks.stream().map(task -> {
+//            Map<String, Object> map = new HashMap<>();
+//            map.put("id", task.getId());
+//            map.put("name", task.getName());
+//            map.put("assignee", task.getAssignee());
+//            map.put("createTime", task.getCreateTime());
+//            map.put("dueDate", task.getDueDate());
+//            map.put("processDefinitionId", task.getProcessDefinitionId());
+//            map.put("processInstanceId", task.getProcessInstanceId());
+//            map.put("priority", task.getPriority());
+//            return map;
+//        }).collect(Collectors.toList());
+
+        return ResponseEntity.ok(tasks);
+    }
+
+    // =========================================================================
+    // 🟢 NEW: SECURE REASSIGN (Replaces reassignTask in api.ts)
+    // =========================================================================
+    @Operation(summary = "Reassign a Task",
+            description = "Transfers task ownership to another user within the same tenant.")
+    @PutMapping("/tasks/{taskId}/assign")
+    public ResponseEntity<?> assignTask(
+            @PathVariable String taskId,
+            @RequestBody Map<String, String> body) {
+
+        String tenantId = userContextService.getCurrentTenantId(); // 🔒
+        String newAssignee = body.get("assignee");
+
+        log.info("👮 ASSIGN: Reassigning task [{}] to [{}] (Tenant: {})", taskId, newAssignee, tenantId);
+
+        // 🔒 SECURITY CHECK: Ensure the task belongs to the user's tenant before modifying
+        Task task = taskService.createTaskQuery().taskId(taskId).taskTenantId(tenantId).singleResult();
+        if (task == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Task not found or access denied"));
+        }
+
+        taskService.setAssignee(taskId, newAssignee);
+        return ResponseEntity.ok(Map.of("message", "Task assigned successfully"));
+    }
+
+    // =========================================================================
+    // 🟢 NEW: SECURE DUE DATE (Replaces updateTaskDueDate in api.ts)
+    // =========================================================================
+    @Operation(summary = "Update Task Due Date", description = "Updates the deadline for a specific task.")
+    @PutMapping("/tasks/{taskId}/due-date")
+    public ResponseEntity<?> updateDueDate(
+            @PathVariable String taskId,
+            @RequestBody Map<String, Date> body) {
+
+        String tenantId = userContextService.getCurrentTenantId(); // 🔒
+        Date newDate = body.get("dueDate");
+
+        // 🔒 SECURITY CHECK: Ensure task belongs to tenant
+        Task task = taskService.createTaskQuery().taskId(taskId).taskTenantId(tenantId).singleResult();
+        if (task == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Task not found"));
+        }
+
+        taskService.setDueDate(taskId, newDate);
+        return ResponseEntity.ok(Map.of("message", "Due date updated"));
+    }
+
+    // =========================================================================
+    // 1. RENDER ENDPOINT (Fully Secure)
     // =========================================================================
     @Operation(
             summary = "Render Task Details & Form Schema",
@@ -78,15 +172,24 @@ public class TaskOperationController {
         log.info("🔍 RENDER: Fetching details for taskId=[{}]", taskId);
 
         try {
-            Task task = taskService.createTaskQuery().taskId(taskId).singleResult();
+            String tenantId = userContextService.getCurrentTenantId();
+            String userId = userContextService.getCurrentUserId();
+
+            // 🔒 SECURITY: Verify the user is either the Assignee OR a Candidate
+            // This prevents "peeking" at tasks assigned to others in the same company.
+            Task task = taskService.createTaskQuery()
+                    .taskId(taskId)
+                    .taskTenantId(tenantId)
+                    .taskCandidateOrAssigned(userId) // 🛑 Strict identity check
+                    .singleResult();
+
             if (task == null) {
-                log.warn("⚠️ RENDER FAILED: Task [{}] not found", taskId);
+                log.warn("⚠️ RENDER FAILED: Task [{}] not found or access denied for user [{}]", taskId, userId);
                 return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body(Map.of("error", "Task not found", "taskId", taskId));
+                        .body(Map.of("error", "Task not found or access denied"));
             }
 
             Map<String, Object> variables = taskService.getVariables(taskId);
-            log.debug("📦 Loaded {} variables for task [{}]", variables.size(), taskId);
 
             // 🟢 FETCH EXTERNAL ACTIONS FROM BPMN XML
             try {
@@ -103,48 +206,34 @@ public class TaskOperationController {
                             userTask.getExtensionElements().get("property");
 
                     if (props != null) {
-                        log.debug("⚙️ Scanning BPMN extension elements for 'externalActions' on task [{}]", taskId);
                         for (org.flowable.bpmn.model.ExtensionElement prop : props) {
                             if ("externalActions".equals(prop.getAttributeValue(null, "name"))) {
-                                String jsonActions = prop.getElementText();
-                                variables.put("externalActions", jsonActions);
-                                log.info("🔘 BPMN ACTIONS: Injected external actions for task [{}]", taskId);
+                                variables.put("externalActions", prop.getElementText());
                             }
                         }
                     }
                 }
             } catch (Exception e) {
-                log.error("⚠️ BPMN PROPERTY ERROR: Could not load extension elements for task [{}]. Error: {}",
-                        taskId,
-                        e.getMessage());
-                // Don't fail the whole render just because buttons failed to load
+                log.error("⚠️ BPMN PROPERTY ERROR: {}", e.getMessage());
             }
 
             Object schema = null;
             try {
                 if (task.getFormKey() != null) {
-                    log.info("📄 FORM FETCH: Loading Form.io schema for key=[{}]", task.getFormKey());
                     schema = formIoClient.getFormSchema(task.getFormKey());
-                } else {
-                    log.warn("⚠️ SCHEMA MISSING: No formKey associated with task [{}]", taskId);
                 }
             } catch (Exception e) {
-                log.error("❌ FORM.IO ERROR: Fetch failed for key=[{}] on task [{}]: {}",
-                        task.getFormKey(),
-                        taskId,
-                        e.getMessage());
-                // Continue so the user can at least see the task details, even if the form fails
+                log.error("❌ FORM.IO ERROR for key=[{}]: {}", task.getFormKey(), e.getMessage());
             }
-            // 👇 1. FETCH PROCESS CONTEXT (Business Key & Process Name)
+
             String businessKey = null;
             String processName = null;
 
             if (task.getProcessInstanceId() != null) {
-                ProcessInstance
-                        processInstance =
-                        runtimeService.createProcessInstanceQuery()
-                                .processInstanceId(task.getProcessInstanceId())
-                                .singleResult();
+                ProcessInstance processInstance = runtimeService.createProcessInstanceQuery()
+                        .processInstanceId(task.getProcessInstanceId())
+                        .processInstanceTenantId(tenantId) // 🔒 Force tenant
+                        .singleResult();
 
                 if (processInstance != null) {
                     businessKey = processInstance.getBusinessKey();
@@ -152,15 +241,13 @@ public class TaskOperationController {
                 }
             }
 
-            // Fallback: If processName is still null (rare), fetch from definition
             if (processName == null && task.getProcessDefinitionId() != null) {
                 try {
                     processName = repositoryService.getProcessDefinition(task.getProcessDefinitionId()).getName();
-                } catch (Exception e) {
-                    log.warn("⚠️ Could not fetch process name for definition [{}]", task.getProcessDefinitionId());
+                } catch (Exception ignored) {
                 }
             }
-            log.info("✅ RENDER SUCCESS: Returning payload for task [{}], name=[{}]", taskId, task.getName());
+
             return ResponseEntity.ok(TaskRenderDto.builder()
                     .taskId(task.getId())
                     .taskName(task.getName())
@@ -185,22 +272,42 @@ public class TaskOperationController {
 
     @Operation(
             summary = "Claim a Task",
-            description = "Assigns a specific task to the user identified by the 'userId' header. " +
-                    "This prevents other users from seeing or working on this task."
+            description = "Assigns a specific task to the current authenticated user. " +
+                    "Includes strict verification that the user is a valid candidate for the task."
     )
     @PostMapping("/claim-task")
     public ResponseEntity<?> claimTask(
-            @Parameter(description = "ID of the task to claim", required = true) @RequestParam String taskId,
-            @Parameter(description = "ID of the user claiming the task", required = true) @RequestHeader("userId")
-            String userId) {
+            @Parameter(description = "ID of the task to claim", required = true) @RequestParam String taskId) {
+
+        String userId = userContextService.getCurrentUserId();     // 🔒 Secure identity
+        String tenantId = userContextService.getCurrentTenantId(); // 🔒 Secure tenant
+
         log.info("✋ CLAIM: User [{}] is claiming task [{}]", userId, taskId);
         try {
+            // 🔒 SECURITY: Verify task belongs to tenant AND user is a valid candidate
+            // This prevents claiming tasks intended for other groups/roles.
+            Task task = taskService.createTaskQuery()
+                    .taskId(taskId)
+                    .taskTenantId(tenantId)
+                    .taskCandidateUser(userId) // 🛑 User must be a candidate
+                    .singleResult();
+
+            if (task == null) {
+                // Check if already assigned
+                Task exists = taskService.createTaskQuery().taskId(taskId).taskTenantId(tenantId).singleResult();
+                if (exists != null && exists.getAssignee() != null) {
+                    return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", "Task is already assigned"));
+                }
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of("error", "Task not found or access denied"));
+            }
+
             taskService.claim(taskId, userId);
             log.info("✅ CLAIM SUCCESS: Task [{}] owned by [{}]", taskId, userId);
             return ResponseEntity.ok(Map.of("message", "Task claimed successfully", "taskId", taskId));
         } catch (Exception e) {
             log.error("❌ CLAIM FAILED: {}", e.getMessage(), e);
-            throw e; // Global Exception Handler will catch standard Flowable exceptions
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
     }
 
@@ -226,18 +333,29 @@ public class TaskOperationController {
         log.info("🚀 SUBMIT: Processing task [{}]. CompleteFlag=[{}]", taskId, payload.getCompleteTask());
 
         try {
-            Task task = taskService.createTaskQuery().taskId(taskId).singleResult();
+            String userId = userContextService.getCurrentUserId();
+            String tenantId = userContextService.getCurrentTenantId();
+
+            // 🔒 SECURITY: Strictly verify that the current user is the current Assignee.
+            // This prevents User A from submitting User B's task.
+            Task task = taskService.createTaskQuery()
+                    .taskId(taskId)
+                    .taskTenantId(tenantId)
+                    .taskAssignee(userId) // 🛑 Strict Ownership Check
+                    .singleResult();
+
             if (task == null) {
-                log.warn("⚠️ SUBMIT FAILED: Task [{}] not found", taskId);
+                Task exists = taskService.createTaskQuery().taskId(taskId).taskTenantId(tenantId).singleResult();
+                if (exists != null) {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                            .body(Map.of("error", "Access Denied. You are not the assignee."));
+                }
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Task not found"));
             }
 
             String
                     targetFormKey =
                     (payload.getSubmittedFormKey() != null) ? payload.getSubmittedFormKey() : task.getFormKey();
-            log.debug("📝 Processing submission using formKey=[{}]", targetFormKey);
-
-            log.info("🧩 DELEGATING: Calling FormSchemaService for form=[{}]", targetFormKey);
             FormSchemaService.SubmissionResult
                     result =
                     formSchemaService.processSubmission(targetFormKey, payload.getFormData(), payload.getVariables());
@@ -245,21 +363,13 @@ public class TaskOperationController {
             Map<String, Object> localVars = new HashMap<>();
             localVars.put("formSubmissionId", result.getSubmissionId());
             localVars.put("submittedFormKey", targetFormKey);
-
-            log.debug("💾 STORING: Saving history markers to task local variables for ID: [{}]", taskId);
             taskService.setVariablesLocal(taskId, localVars);
 
             if (Boolean.TRUE.equals(payload.getCompleteTask())) {
-                log.info("🏁 ACTION: Completing task [{}] and moving workflow forward", taskId);
-
-                // 🟢 CRITICAL MOMENT: This triggers the Flowable Transaction.
                 taskService.complete(taskId, result.getProcessVariables());
-
                 return ResponseEntity.ok(Map.of("message", "Task Completed", "submissionId", result.getSubmissionId()));
             } else {
-                log.info("💾 ACTION: Updating task [{}] variables (Draft Mode)", taskId);
                 taskService.setVariables(taskId, result.getProcessVariables());
-
                 return ResponseEntity.ok(Map.of("message",
                         "Task Saved (Draft)",
                         "submissionId",
@@ -267,25 +377,17 @@ public class TaskOperationController {
             }
 
         } catch (Exception e) {
-            // 🟢 UPDATED ERROR HANDLING (Preserving your logic)
             log.error("🛑 ROLLBACK: Task completion failed for [{}]. Reason: {}", taskId, e.getMessage(), e);
 
             String userMessage = "Process failed.";
-
-            // 1. Handle Network Timeouts
             if (e.getMessage() != null && e.getMessage().contains("IO exception")) {
                 userMessage = "Network Timeout: The email server did not respond in time. Please try again.";
-            }
-            // 2. Handle Logic Failures (e.g. from Script Task)
-            else if (e.getMessage() != null && e.getMessage().contains("Email Error:")) {
+            } else if (e.getMessage() != null && e.getMessage().contains("Email Error:")) {
                 userMessage = e.getMessage();
-            }
-            // 3. Handle Other Errors
-            else {
+            } else {
                 userMessage = "Error: " + e.getMessage();
             }
 
-            // Return 422 (Unprocessable Entity) as JSON
             return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
                     .body(Map.of("error", "Process Execution Failed", "message", userMessage));
         }
@@ -303,20 +405,22 @@ public class TaskOperationController {
             @RequestBody TaskSubmitDto payload) {
         log.info("🏗️ START PROCESS: Initiating instance for definition=[{}]", processDefinitionKey);
         try {
+            String tenantId = userContextService.getCurrentTenantId();
+            String userId = userContextService.getCurrentUserId();
+
             FormSchemaService.SubmissionResult
                     result =
                     formSchemaService.processSubmission(payload.getSubmittedFormKey(),
                             payload.getFormData(),
                             payload.getVariables());
 
-            log.info("🌟 STARTING: Mapping initial variables and creating process instance...");
-            result.getProcessVariables().put("initiator", "user");
+            result.getProcessVariables().put("initiator", userId);
 
-            ProcessInstance
-                    processInstance =
-                    runtimeService.startProcessInstanceByKey(processDefinitionKey, result.getProcessVariables());
+            // 🟢 Tenant-Aware Start
+            ProcessInstance processInstance = runtimeService.startProcessInstanceByKeyAndTenantId(processDefinitionKey,
+                    result.getProcessVariables(),
+                    tenantId);
 
-            log.info("✅ START SUCCESS: Instance created with ID=[{}]", processInstance.getId());
             return ResponseEntity.status(HttpStatus.CREATED)
                     .body(Map.of("message",
                             "Process Started Successfully",
@@ -324,14 +428,14 @@ public class TaskOperationController {
                             processInstance.getId()));
 
         } catch (Exception e) {
-            log.error("❌ START ERROR: Failed to initiate process [{}]: {}", processDefinitionKey, e.getMessage(), e);
+            log.error("❌ START ERROR: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to start process", "message", e.getMessage()));
         }
     }
 
     // =========================================================================
-    // 3. HISTORY TIMELINE ENDPOINT
+    // 3. HISTORY TIMELINE ENDPOINT (Secured)
     // =========================================================================
     @Operation(
             summary = "Get Process History Timeline",
@@ -344,16 +448,17 @@ public class TaskOperationController {
         log.info("🕰️ HISTORY: Fetching timeline for process [{}]", processInstanceId);
 
         try {
-            List<HistoricActivityInstance>
-                    activities =
-                    historyService.createHistoricActivityInstanceQuery()
-                            .processInstanceId(processInstanceId)
-                            .orderByHistoricActivityInstanceStartTime()
-                            .desc()
-                            .list();
+            String tenantId = userContextService.getCurrentTenantId();
+            List<HistoricActivityInstance> activities = historyService.createHistoricActivityInstanceQuery()
+                    .processInstanceId(processInstanceId)
+                    .activityTenantId(tenantId) // 🔒 Tenant isolation
+                    .orderByHistoricActivityInstanceStartTime()
+                    .desc()
+                    .list();
 
             if (activities.isEmpty() &&
                     historyService.createHistoricProcessInstanceQuery()
+                            .processInstanceTenantId(tenantId)
                             .processInstanceId(processInstanceId)
                             .singleResult() == null) {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Process instance not found"));
@@ -372,7 +477,6 @@ public class TaskOperationController {
                 event.put("endTime", act.getEndTime());
                 event.put("status", act.getEndTime() != null ? "COMPLETED" : "ACTIVE");
 
-
                 if ("userTask".equals(act.getActivityType()) && act.getTaskId() != null) {
                     HistoricTaskInstance
                             task =
@@ -388,12 +492,9 @@ public class TaskOperationController {
                                 historyService.createHistoricVariableInstanceQuery().taskId(act.getTaskId()).list();
 
                         for (HistoricVariableInstance var : taskVariables) {
-                            if ("formSubmissionId".equals(var.getVariableName())) {
+                            if ("formSubmissionId".equals(var.getVariableName()))
                                 event.put("formSubmissionId", var.getValue());
-                            }
-                            if ("submittedFormKey".equals(var.getVariableName())) {
-                                event.put("formKey", var.getValue());
-                            }
+                            if ("submittedFormKey".equals(var.getVariableName())) event.put("formKey", var.getValue());
                         }
                     }
                 } else {
@@ -407,7 +508,6 @@ public class TaskOperationController {
                 }
                 timeline.add(event);
             }
-
             return ResponseEntity.ok(timeline);
 
         } catch (Exception e) {
@@ -426,23 +526,21 @@ public class TaskOperationController {
     public ResponseEntity<?> getProcessXml(@PathVariable String processInstanceId) {
         log.info("📜 XML REQUEST: Fetching BPMN for process [{}]", processInstanceId);
         try {
-            HistoricProcessInstance
-                    processInstance =
-                    historyService.createHistoricProcessInstanceQuery()
-                            .processInstanceId(processInstanceId)
-                            .singleResult();
+            String tenantId = userContextService.getCurrentTenantId();
+            HistoricProcessInstance processInstance = historyService.createHistoricProcessInstanceQuery()
+                    .processInstanceTenantId(tenantId)
+                    .processInstanceId(processInstanceId)
+                    .singleResult();
 
             if (processInstance == null) {
-                log.warn("⚠️ XML FAILED: Process instance [{}] not found", processInstanceId);
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Process not found"));
             }
 
             try (InputStream resourceStream = repositoryService.getProcessModel(processInstance.getProcessDefinitionId())) {
-                log.info("✅ XML SUCCESS: Returning BPMN model for process [{}]", processInstanceId);
                 return ResponseEntity.ok(IOUtils.toString(resourceStream, StandardCharsets.UTF_8));
             }
         } catch (Exception e) {
-            log.error("❌ XML ERROR: Failed to load model for instance [{}]: {}", processInstanceId, e.getMessage(), e);
+            log.error("❌ XML ERROR: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to load XML", "message", e.getMessage()));
         }
@@ -457,29 +555,27 @@ public class TaskOperationController {
     public ResponseEntity<?> getHighlights(@PathVariable String processInstanceId) {
         log.info("🎨 HIGHLIGHTS: Fetching active/completed nodes for process [{}]", processInstanceId);
         try {
-            List<String>
-                    completedIds =
-                    historyService.createHistoricActivityInstanceQuery()
-                            .processInstanceId(processInstanceId)
-                            .finished()
-                            .list()
-                            .stream()
-                            .map(HistoricActivityInstance::getActivityId)
-                            .distinct()
-                            .toList();
+            String tenantId = userContextService.getCurrentTenantId();
+            List<String> completedIds = historyService.createHistoricActivityInstanceQuery()
+                    .processInstanceId(processInstanceId)
+                    .activityTenantId(tenantId)
+                    .finished()
+                    .list()
+                    .stream()
+                    .map(HistoricActivityInstance::getActivityId)
+                    .distinct()
+                    .toList();
 
-            List<String>
-                    activeIds =
-                    runtimeService.createActivityInstanceQuery()
-                            .processInstanceId(processInstanceId)
-                            .unfinished()
-                            .list()
-                            .stream()
-                            .map(org.flowable.engine.runtime.ActivityInstance::getActivityId)
-                            .distinct()
-                            .toList();
+            List<String> activeIds = runtimeService.createActivityInstanceQuery()
+                    .processInstanceId(processInstanceId)
+                    .activityTenantId(tenantId)
+                    .unfinished()
+                    .list()
+                    .stream()
+                    .map(org.flowable.engine.runtime.ActivityInstance::getActivityId)
+                    .distinct()
+                    .toList();
 
-            log.info("📤 HIGHLIGHTS SUCCESS: CompletedNodes={}, ActiveNodes={}", completedIds.size(), activeIds.size());
             return ResponseEntity.ok(Map.of("completed", completedIds, "active", activeIds));
         } catch (Exception e) {
             log.error("❌ HIGHLIGHTS ERROR: {}", e.getMessage(), e);
@@ -489,78 +585,69 @@ public class TaskOperationController {
     }
 
     // =========================================================================
-    // 🟢 NEW: SERVER-SIDE BATCH PROCESSING
+    // 🟢 SERVER-SIDE BATCH PROCESSING (Secured)
     // =========================================================================
-
     @Operation(
             summary = "Batch Start Process Instances",
             description = "Accepts a list of variable maps and starts a process instance for each item. \n" +
                     "Executes on the server for high performance. Returns a summary of successes and failures."
     )
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Batch processing complete (check body for individual errors)"),
+            @ApiResponse(responseCode = "200", description = "Batch processing complete"),
             @ApiResponse(responseCode = "500", description = "Critical server failure")
     })
     @PostMapping("/process/{processDefinitionKey}/batch-start")
     public ResponseEntity<?> batchStartProcess(
-            @Parameter(description = "Key of the process to start (e.g. 'hiringProcess')", required = true)
+            @Parameter(description = "Key of the process to start", required = true)
             @PathVariable String processDefinitionKey,
             @RequestBody List<Map<String, Object>> batchData,
             Authentication authentication
     ) {
         log.info("🚀 BATCH START: Received [{}] items for process [{}]", batchData.size(), processDefinitionKey);
 
-        // 1. Extract User ID safely to set as 'initiator'
-        String userId = "batch-runner";
-        if (authentication != null && authentication.getPrincipal() instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> claims = (Map<String, Object>) authentication.getPrincipal();
-            userId = (String) claims.get("id");
-        }
+        String tenantId = userContextService.getCurrentTenantId();
+        String userId = userContextService.getCurrentUserId();
 
         int successCount = 0;
         int failCount = 0;
         List<String> logs = new ArrayList<>();
 
-        // 2. Server-Side Loop
         for (int i = 0; i < batchData.size(); i++) {
             Map<String, Object> variables = batchData.get(i);
             try {
-                // 1. Extract Business Key if present (and remove from vars to avoid duplication)
                 String businessKey = null;
                 if (variables.containsKey("businessKey")) {
-
                     businessKey = String.valueOf(variables.get("businessKey"));
                     variables.remove("businessKey");
                 }
 
-                // 2. Set Metadata
                 variables.put("initiator", userId);
                 variables.put("batchSource", "api-upload");
 
-                // 3. Start Instance (Handle both cases)
                 ProcessInstance instance;
                 if (businessKey != null && !businessKey.isEmpty()) {
-                    // 🟢 Start WITH Business Key
-                    instance = runtimeService.startProcessInstanceByKey(processDefinitionKey, businessKey, variables);
+                    instance =
+                            runtimeService.startProcessInstanceByKeyAndTenantId(processDefinitionKey,
+                                    businessKey,
+                                    variables,
+                                    tenantId);
                 } else {
-                    // ⚪ Start WITHOUT Business Key
-                    instance = runtimeService.startProcessInstanceByKey(processDefinitionKey, variables);
+                    instance =
+                            runtimeService.startProcessInstanceByKeyAndTenantId(processDefinitionKey,
+                                    variables,
+                                    tenantId);
                 }
 
-                successCount++;                // Optional: Reduce log noise for large batches
+                successCount++;
                 if (batchData.size() < 100) {
                     logs.add("✅ Row " + (i + 1) + ": Started (ID: " + instance.getId() + ")");
                 }
-
             } catch (Exception e) {
                 failCount++;
-                log.error("❌ BATCH ROW [{}] FAILED: {}", i + 1, e.getMessage());
                 logs.add("❌ Row " + (i + 1) + " Failed: " + e.getMessage());
             }
         }
 
-        // 3. Construct Summary Response
         Map<String, Object> response = new HashMap<>();
         response.put("total", batchData.size());
         response.put("success", successCount);
@@ -568,7 +655,6 @@ public class TaskOperationController {
         response.put("logs", logs);
 
         log.info("🏁 BATCH COMPLETE: {} Success, {} Failed", successCount, failCount);
-
         return ResponseEntity.ok(response);
     }
 }

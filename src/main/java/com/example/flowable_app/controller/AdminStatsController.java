@@ -1,5 +1,6 @@
 package com.example.flowable_app.controller;
 
+import com.example.flowable_app.service.UserContextService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.flowable.engine.*;
@@ -26,19 +27,52 @@ public class AdminStatsController {
     private final HistoryService historyService;
     private final RepositoryService repositoryService;
     private final ManagementService managementService;
+    private final UserContextService userContextService; // 🟢 Injected for Tenant Awareness
 
+    /**
+     * 🟢 SYSTEM OVERVIEW (Tenant Scoped)
+     * Fetches high-level statistics (Active Instances, Tasks, Jobs) strictly for the current tenant.
+     */
     @GetMapping("/system-overview")
     public ResponseEntity<?> getSystemOverview() {
         try {
+            // 🔒 SECURITY: Retrieve current tenant to enforce data isolation
+            String tenantId = userContextService.getCurrentTenantId();
+
             Map<String, Object> stats = new HashMap<>();
-            stats.put("activeInstances", runtimeService.createProcessInstanceQuery().count());
-            stats.put("completedInstances", historyService.createHistoricProcessInstanceQuery().finished().count());
-            stats.put("activeTasks", taskService.createTaskQuery().count());
-            stats.put("completedTasks", historyService.createHistoricTaskInstanceQuery().finished().count());
-            stats.put("failedJobs", managementService.createDeadLetterJobQuery().count());
-            stats.put("timerJobs", managementService.createTimerJobQuery().count());
+
+            // 1. Process Instances (Active & Completed)
+            stats.put("activeInstances", runtimeService.createProcessInstanceQuery()
+                    .processInstanceTenantId(tenantId) // 🔒 Filter by Tenant
+                    .count());
+
+            stats.put("completedInstances", historyService.createHistoricProcessInstanceQuery()
+                    .processInstanceTenantId(tenantId) // 🔒 Filter by Tenant
+                    .finished()
+                    .count());
+
+            // 2. User Tasks (Active & Completed)
+            stats.put("activeTasks", taskService.createTaskQuery()
+                    .taskTenantId(tenantId) // 🔒 Filter by Tenant
+                    .count());
+
+            stats.put("completedTasks", historyService.createHistoricTaskInstanceQuery()
+                    .taskTenantId(tenantId) // 🔒 Filter by Tenant
+                    .finished()
+                    .count());
+
+            // 3. System Jobs (Timers & Dead Letters)
+            // Note: Job queries support .jobTenantId() in standard Flowable distributions.
+            stats.put("failedJobs", managementService.createDeadLetterJobQuery()
+                    .jobTenantId(tenantId) // 🔒 Filter by Tenant
+                    .count());
+
+            stats.put("timerJobs", managementService.createTimerJobQuery()
+                    .jobTenantId(tenantId) // 🔒 Filter by Tenant
+                    .count());
 
             return ResponseEntity.ok(stats);
+
         } catch (Exception e) {
             log.error("❌ STATS ERROR: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -46,22 +80,46 @@ public class AdminStatsController {
         }
     }
 
+    /**
+     * 🟢 PROCESS DISTRIBUTION (Tenant Scoped)
+     * Returns a breakdown of active instances and tasks per Process Definition.
+     * Only returns definitions deployed for this tenant.
+     */
     @GetMapping("/process-distribution")
     public ResponseEntity<?> getProcessDistribution() {
         try {
-            List<ProcessDefinition> defs = repositoryService.createProcessDefinitionQuery().latestVersion().list();
+            String tenantId = userContextService.getCurrentTenantId(); // 🔒 Get Tenant
+
+            // 1. Fetch Definitions belonging ONLY to this tenant
+            List<ProcessDefinition> defs = repositoryService.createProcessDefinitionQuery()
+                    .latestVersion()
+                    .processDefinitionTenantId(tenantId) // 🔒 Filter definitions
+                    .list();
+
+            // 2. Map statistics for each definition
             List<Map<String, Object>> distribution = defs.stream().map(def -> {
                 Map<String, Object> item = new HashMap<>();
                 item.put("key", def.getKey());
                 item.put("name", def.getName());
                 item.put("version", def.getVersion());
-                item.put("activeInstances",
-                        runtimeService.createProcessInstanceQuery().processDefinitionKey(def.getKey()).count());
-                item.put("activeTasks", taskService.createTaskQuery().processDefinitionKey(def.getKey()).count());
+
+                // 🔒 Count instances for this specific definition AND tenant
+                item.put("activeInstances", runtimeService.createProcessInstanceQuery()
+                        .processDefinitionKey(def.getKey())
+                        .processInstanceTenantId(tenantId) // 🔒 Double-check tenant
+                        .count());
+
+                // 🔒 Count tasks for this specific definition AND tenant
+                item.put("activeTasks", taskService.createTaskQuery()
+                        .processDefinitionKey(def.getKey())
+                        .taskTenantId(tenantId) // 🔒 Double-check tenant
+                        .count());
+
                 return item;
             }).collect(Collectors.toList());
 
             return ResponseEntity.ok(distribution);
+
         } catch (Exception e) {
             log.error("❌ STATS ERROR: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
