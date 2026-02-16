@@ -140,8 +140,7 @@ jobs:
             SERVER_FORWARD_HEADERS_STRATEGY=framework
             SPRING_APP_FRONTEND_URL=${{ env.ENV_FRONTEND_URL }}
             SPRING_APP_BACKEND_URL=${{ env.ENV_BACKEND_URL }}
-            SPRING_TOOLJET_INTERNAL_URL=http://localhost:8082
-            SPRING_TOOLJET_ORGANIZATION_ID=d776c8cf-3808-4a91-9525-6b0982f8b4d3
+            SPRING_TOOLJET_INTERNAL_URL=https://infinity-plus-tooljet-493376716946.asia-south2.run.app
             SPRING_TOOLJET_ADMIN_EMAIL=rishavj0212@gmail.com
             SPRING_TOOLJET_ADMIN_PASSWORD=02122002@Rj
           secrets: |

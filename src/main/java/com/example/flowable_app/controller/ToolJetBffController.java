@@ -1,7 +1,11 @@
 package com.example.flowable_app.controller;
 
+import com.example.flowable_app.entity.ToolJetWorkspace;
+import com.example.flowable_app.repository.ToolJetWorkspaceRepository;
+import com.example.flowable_app.repository.TooljetWorkspaceAppRepository;
 import com.example.flowable_app.service.AllowedUserService;
 import com.example.flowable_app.service.ToolJetAuthService;
+import com.example.flowable_app.service.UserContextService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -31,24 +35,44 @@ public class ToolJetBffController {
 
     private final ToolJetAuthService authService;
     private final AllowedUserService userService;
+    private final UserContextService userContextService; // 🟢 Needed for Tenant Context
+
+    // 🟢 New Repositories for Dynamic Lookup
+    private final TooljetWorkspaceAppRepository appRepository;
+    private final ToolJetWorkspaceRepository workspaceRepository;
+
     private final RestTemplate restTemplate = new RestTemplate();
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
-    @Value("${tooljet.internal.url:http://localhost:8082}")
-    private String tooljetUrl; // ✅ Use the property, not hardcoded string
-    @Value("${tooljet.organization.id}")
-    private String organizationId;
 
+    @Value("${tooljet.internal.url}")
+    private String tooljetUrl;
+
+    // 🔴 Removed hardcoded organizationId. We now look this up per tenant.
+
+    /**
+     * Step 1: Frontend asks for a ticket using a generic "Key" (e.g. "hr-dashboard")
+     */
     @PostMapping("/api/tooljet/embed-ticket")
     public ResponseEntity<?> getTicket(
-            @RequestParam String appId, @AuthenticationPrincipal Map<String, Object> details) {
-        String userId = (String) details.get("id");
-        String email = (String) details.get("email");
-        String ticket = authService.generateTicket(userId, email, appId);
+            @RequestParam String appKey, // 🟢 Accepts 'appKey' instead of raw 'appId'
+            @AuthenticationPrincipal Map<String, Object> details) {
+
+        // 1. Identify User & Tenant from Context
+        String tenantId = userContextService.getCurrentTenantId();
+        String userId = userContextService.getCurrentUserId();
+        String email = userContextService.getCurrentUserEmail();
+
+        // 2. 🔍 LOOKUP: Convert "hr-dashboard" -> "uuid-555-777" for THIS tenant
+        String realAppId = appRepository.findAppIdByTenantAndKey(tenantId, appKey)
+                .orElseThrow(() -> new RuntimeException("App '" + appKey + "' not authorized for tenant: " + tenantId));
+
+        // 3. Generate Ticket (Now binds tenantId)
+        String ticket = authService.generateTicket(userId, email, realAppId, tenantId);
 
         return ResponseEntity.ok(Map.of(
                 "ticket", ticket,
-                "iframeUrl", "/tooljet/ticket/" + ticket + "/applications/" + appId
+                "iframeUrl", "/tooljet/ticket/" + ticket + "/applications/" + realAppId
         ));
     }
 
@@ -72,6 +96,7 @@ public class ToolJetBffController {
             @CookieValue(name = "TJ_BFF_SESSION", required = false) String bffSession) {
 
         String userEmail;
+        String tenantId; // 🟢 We need this to forward to the correct workspace
         String fullPath = request.getRequestURI();
         String targetPath = fullPath;
 
@@ -80,9 +105,12 @@ public class ToolJetBffController {
             ToolJetAuthService.TicketInfo info = authService.validateTicket(ticket);
             if (info == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
 
-            String secureSessionId = authService.promoteTicketToSession(info.email());
+            // 🟢 Promote ticket using Email AND TenantID
+            String secureSessionId = authService.promoteTicketToSession(info.email(), info.tenantId());
 
-            // --- ADD THIS LOGIC ---
+            userEmail = info.email();
+            tenantId = info.tenantId();
+
             // Fetch the real ID to sync it with the frontend URL
             String verifiedId = userService.getUserIdByEmail(info.email());
 
@@ -95,35 +123,33 @@ public class ToolJetBffController {
                     .build();
             response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
 
-            userEmail = info.email();
-
-            // Construct the path that includes the userId for the browser
             // Result: /applications/<app-id>?userId= ?
             String cleanPathForBrowser = fullPath.substring(fullPath.indexOf("/applications/"))
                     + "?userId=" + verifiedId;
 
             // Use the modified path for the script injection
-            return injectUrlFixerScript(executeProxyWithRetry(targetPath, request, userEmail, body),
+            return injectUrlFixerScript(executeProxyWithRetry(targetPath, request, userEmail, body, tenantId),
                     cleanPathForBrowser);
         }
 
         // 2. Subsequent requests (Assets/APIs)
         if (bffSession != null) {
-            // 🛑 CHANGE: Look up the real email from the Map using the UUID from the cookie
-            userEmail = authService.getEmailFromSession(bffSession);
+            // 🟢 Recover Session Data (Email + Tenant)
+            ToolJetAuthService.SessionData sessionData = authService.getSessionData(bffSession);
 
-            if (userEmail == null) {
+            if (sessionData == null) {
                 log.warn("🚨 Invalid or expired TJ_BFF_SESSION: {}", bffSession);
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
             }
+            userEmail = sessionData.email();
+            tenantId = sessionData.tenantId();
             targetPath = fullPath;
         } else {
             // 🛑 DENY: No ticket and no session cookie
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
-
-        return executeProxyWithRetry(targetPath, request, userEmail, body);
+        return executeProxyWithRetry(targetPath, request, userEmail, body, tenantId);
     }
 
     /**
@@ -158,68 +184,68 @@ public class ToolJetBffController {
         // 📝 LOG: Start of Request
         log.info("🔹 [SECURE RUN] Request received for Query ID: {}", queryId);
 
-        String userEmail = authService.getEmailFromSession(bffSession);
-        if (userEmail == null) {
+        // 🟢 Recover Tenant Context
+        ToolJetAuthService.SessionData sessionData = authService.getSessionData(bffSession);
+        if (sessionData == null) {
             log.warn("❌ [SECURE RUN] Unauthorized: No valid session found.");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
+        String userEmail = sessionData.email();
+        String tenantId = sessionData.tenantId();
+
         String trustedUserId = userService.getUserIdByEmail(userEmail);
-        log.info("👤 [SECURE RUN] Authenticated User: {} (ID: {})", userEmail, trustedUserId);
+        log.info("👤 [SECURE RUN] Authenticated User: {} (ID: {}) Tenant: {}", userEmail, trustedUserId, tenantId);
 
         try {
-            // 1. Extract Slug
+            // 1. Extract Slug (or UUID in new system)
             String appSlug = extractAppSlug(request);
             if (appSlug.isEmpty()) {
                 log.warn("⚠️ [SECURE RUN] Could not determine App Slug. Falling back to standard proxy.");
                 byte[] jsonBody = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(body);
-                return executeProxyWithRetry(request.getRequestURI(), request, userEmail, jsonBody);
+                return executeProxyWithRetry(request.getRequestURI(), request, userEmail, jsonBody, tenantId);
             }
-            log.info("🐌 [SECURE RUN] App Slug: {}", appSlug);
+            log.info("🐌 [SECURE RUN] App Slug/ID: {}", appSlug);
 
-            // 2. Fetch Metadata
+            // 2. Fetch Metadata (Now passing TenantID to get correct headers)
             Map<String, Object> queryMeta;
             try {
-                queryMeta = fetchQueryMetadata(queryId, appSlug);
+                queryMeta = fetchQueryMetadata(queryId, appSlug, tenantId);
             } catch (HttpStatusCodeException e) {
                 if (e.getStatusCode() == HttpStatus.UNAUTHORIZED) {
                     log.warn("🔄 [SECURE RUN] Session expired. Refreshing...");
-                    authService.clearSession();
-                    queryMeta = fetchQueryMetadata(queryId, appSlug);
+                    authService.clearSession(tenantId); // 🟢 Clear specific tenant session
+                    queryMeta = fetchQueryMetadata(queryId, appSlug, tenantId);
                 } else {
                     throw e;
                 }
             }
-            log.info("📋 [SECURE RUN] Metadata Fetched. Query Name: {}",
-                    queryMeta.get("name")); // Assuming 'name' exists in options or root
+            log.info("📋 [SECURE RUN] Metadata Fetched. Query Name: {}", queryMeta.get("name"));
 
             String dataSourceId = (String) queryMeta.get("data_source_id");
-            DatasourceConfig dsConfig = fetchDatasourceConfig(dataSourceId);
+            DatasourceConfig dsConfig = fetchDatasourceConfig(dataSourceId, tenantId);
             log.info("🔌 [SECURE RUN] Datasource Config - Kind: {}, Schema: {}", dsConfig.kind, dsConfig.schema);
 
             String dsKind = (String) queryMeta.get("kind");
             log.info("🔌 [SECURE RUN] Datasource Kind from Definition: {}", dsKind);
 
             // 3. Proxy Non-Postgres
-            // Check for 'postgres' OR 'mysql' if you are still migrating
             if (dsKind == null || !dsKind.toLowerCase().contains("postgres")) {
                 log.info("🔀 [SECURE RUN] Kind is '{}'. Proxying to ToolJet.", dsKind);
                 byte[] jsonBody = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(body);
-                return executeProxyWithRetry(request.getRequestURI(), request, userEmail, jsonBody);
+                return executeProxyWithRetry(request.getRequestURI(), request, userEmail, jsonBody, tenantId);
             }
 
-            // 3. Extract SQL
+            // 4. Extract SQL
             Map<String, Object> options = (Map<String, Object>) queryMeta.get("options");
             String originalSql = (String) options.get("query");
 
-            // 🛑 Check for Null SQL (e.g. Google Sheets query masquerading as SQL)
             if (originalSql == null) {
                 log.warn("⚠️ [SECURE RUN] SQL is null! This is likely not a DB query. Proxying.");
                 byte[] jsonBody = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(body);
-                return executeProxyWithRetry(request.getRequestURI(), request, userEmail, jsonBody);
+                return executeProxyWithRetry(request.getRequestURI(), request, userEmail, jsonBody, tenantId);
             }
 
             log.debug("📜 [SECURE RUN] Raw SQL: {}", originalSql);
-
 
             Map<String, Object> params = (body != null && body.containsKey("params"))
                     ? (Map<String, Object>) body.get("params")
@@ -228,7 +254,7 @@ public class ToolJetBffController {
             SqlAndBindings prepared = convertToPreparedSql(originalSql, params);
             log.info("🔧 [SECURE RUN] Executing SQL: {}", prepared.sql);
 
-            // 4. Execute with RLS
+            // 5. Execute with RLS
             List<Map<String, Object>> results = transactionTemplate.execute(status -> {
                 if (dsConfig.schema != null && !dsConfig.schema.equalsIgnoreCase("public")) {
                     log.debug("⚙️ [DB] Setting search_path to: {}", dsConfig.schema);
@@ -237,7 +263,6 @@ public class ToolJetBffController {
 
                 log.debug("⚙️ [DB] Setting RLS user to: {}", trustedUserId);
 
-                // 🟢 FIXED: Use queryForObject instead of update because set_config returns a value
                 jdbcTemplate.queryForObject("SELECT set_config('app.current_user', ?, true)",
                         String.class,
                         trustedUserId);
@@ -274,11 +299,18 @@ public class ToolJetBffController {
         return "";
     }
 
-    private Map<String, Object> fetchQueryMetadata(String queryId, String appSlug) {
+    // 🟢 Updated: Requires tenantId to get correct session/workspace
+    private Map<String, Object> fetchQueryMetadata(String queryId, String appSlug, String tenantId) {
+        // NOTE: If appSlug is a UUID, this usually works on ToolJet too.
         String url = tooljetUrl + "/api/apps/slugs/" + appSlug;
+
+        // Lookup Workspace Config
+        ToolJetWorkspace config = workspaceRepository.findByTenantId(tenantId)
+                .orElseThrow(() -> new RuntimeException("Tenant config missing for: " + tenantId));
+
         HttpHeaders headers = new HttpHeaders();
-        headers.add(HttpHeaders.COOKIE, authService.getToolJetSession());
-        headers.add("tj-workspace-id", organizationId);
+        headers.add(HttpHeaders.COOKIE, authService.getToolJetSession(tenantId));
+        headers.add("tj-workspace-id", config.getWorkspaceUuid()); // 🟢 Dynamic ID
         headers.setContentType(MediaType.APPLICATION_JSON);
 
         ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), Map.class);
@@ -295,8 +327,6 @@ public class ToolJetBffController {
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Query ID not found"));
 
-        // 🟢 FIX: Extract 'kind' directly from the nested dataSource object
-        // The structure is: query -> dataSource -> kind
         String dsKind = "unknown";
         if (matchedQuery.containsKey("dataSource")) {
             Map<String, Object> dsObj = (Map<String, Object>) matchedQuery.get("dataSource");
@@ -309,23 +339,26 @@ public class ToolJetBffController {
         result.put("data_source_id", matchedQuery.get("dataSourceId"));
         result.put("options", matchedQuery.get("options"));
         result.put("name", matchedQuery.get("name"));
-        result.put("kind", dsKind); // <--- Added this
+        result.put("kind", dsKind);
 
         return result;
     }
 
-    private DatasourceConfig fetchDatasourceConfig(String datasourceId) {
+    // 🟢 Updated: Requires tenantId to get correct session/workspace
+    private DatasourceConfig fetchDatasourceConfig(String datasourceId, String tenantId) {
         try {
             String url = tooljetUrl + "/api/data_sources/" + datasourceId;
+
+            ToolJetWorkspace config = workspaceRepository.findByTenantId(tenantId)
+                    .orElseThrow(() -> new RuntimeException("Tenant config missing"));
+
             HttpHeaders headers = new HttpHeaders();
-            headers.add(HttpHeaders.COOKIE, authService.getToolJetSession());
-            headers.add("tj-workspace-id", organizationId);
-            headers.add("x-tooljet-workspace-id", organizationId);
+            headers.add(HttpHeaders.COOKIE, authService.getToolJetSession(tenantId));
+            headers.add("tj-workspace-id", config.getWorkspaceUuid()); // 🟢 Dynamic
+            headers.add("x-tooljet-workspace-id", config.getWorkspaceUuid()); // 🟢 Dynamic
             headers.setContentType(MediaType.APPLICATION_JSON);
 
-            ResponseEntity<Map>
-                    response =
-                    restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), Map.class);
+            ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), Map.class);
             Map<String, Object> body = response.getBody();
 
             if (body != null) {
@@ -364,38 +397,41 @@ public class ToolJetBffController {
         return new SqlAndBindings(sb.toString(), argsList.toArray());
     }
 
-    private ResponseEntity<byte[]> executeProxyWithRetry(String path, HttpServletRequest request, String userEmail, byte[] body) {
+    private ResponseEntity<byte[]> executeProxyWithRetry(String path, HttpServletRequest request, String userEmail, byte[] body, String tenantId) {
         try {
-            return forwardRequest(path, request, userEmail, body);
+            return forwardRequest(path, request, userEmail, body, tenantId);
         } catch (HttpStatusCodeException e) {
             if (e.getStatusCode() == HttpStatus.UNAUTHORIZED) {
                 log.warn("🔄 ToolJet session expired. Refreshing and retrying...");
-                authService.clearSession();
-                return forwardRequest(path, request, userEmail, body);
+                authService.clearSession(tenantId);
+                return forwardRequest(path, request, userEmail, body, tenantId);
             }
             throw e;
         }
     }
 
-    private ResponseEntity<byte[]> forwardRequest(String path, HttpServletRequest request, String userEmail, byte[] body) {
-        String correctOrgId = "d776c8cf-3808-4a91-9525-6b0982f8b4d3";
+    // 🟢 Updated: Now accepts TenantID to look up Dynamic Config
+    private ResponseEntity<byte[]> forwardRequest(String path, HttpServletRequest request, String userEmail, byte[] body, String tenantId) {
 
-        // 1. Build the target URI
+        // 1. 🔍 Fetch Dynamic Config for this Tenant
+        ToolJetWorkspace config = workspaceRepository.findByTenantId(tenantId)
+                .orElseThrow(() -> new RuntimeException("Tenant config missing for: " + tenantId));
+
+        // 2. Build the target URI (Using Dynamic Slug)
         URI targetUri = UriComponentsBuilder.fromHttpUrl(tooljetUrl)
                 .path(path)
                 .query(request.getQueryString())
-                .replaceQueryParam("workspaceSlug", correctOrgId)
+                .replaceQueryParam("workspaceSlug", config.getSlug()) // 🟢 Dynamic Slug
                 .build(true).toUri();
 
-        // 2. Prepare Request Headers
+        // 3. Prepare Request Headers (Using Dynamic IDs)
         HttpHeaders headers = new HttpHeaders();
-        headers.add(HttpHeaders.COOKIE, authService.getToolJetSession());
-        headers.add("tj-workspace-id", correctOrgId);
-        headers.add("x-tooljet-workspace-id", correctOrgId);
+        headers.add(HttpHeaders.COOKIE, authService.getToolJetSession(tenantId)); // 🟢 Tenant Session
+        headers.add("tj-workspace-id", config.getWorkspaceUuid()); // 🟢 Dynamic ID
+        headers.add("x-tooljet-workspace-id", config.getWorkspaceUuid()); // 🟢 Dynamic ID
         headers.add("X-Forwarded-Host", "localhost:8080");
         headers.add("X-Forwarded-Proto", "http");
 
-        // ✅ ADDED: Pass through 'If-None-Match' to ToolJet for ETag validation
         String ifNoneMatch = request.getHeader(HttpHeaders.IF_NONE_MATCH);
         if (ifNoneMatch != null) {
             headers.add(HttpHeaders.IF_NONE_MATCH, ifNoneMatch);
@@ -405,7 +441,7 @@ public class ToolJetBffController {
             headers.setContentType(MediaType.parseMediaType(request.getContentType()));
         }
 
-        // 3. Execute Exchange
+        // 4. Execute Exchange
         ResponseEntity<byte[]> tooljetRes = restTemplate.exchange(
                 targetUri,
                 HttpMethod.valueOf(request.getMethod()),
@@ -413,14 +449,13 @@ public class ToolJetBffController {
                 byte[].class
         );
 
-        // ✅ PERFORMANCE FIX: Handle 304 Not Modified from ToolJet
         if (tooljetRes.getStatusCode() == HttpStatus.NOT_MODIFIED) {
             return new ResponseEntity<>(null, tooljetRes.getHeaders(), HttpStatus.NOT_MODIFIED);
         }
 
         byte[] responseBody = tooljetRes.getBody();
 
-        // 4. THE MIRROR: Rewrite any internal URLs in JSON responses
+        // 5. THE MIRROR (Unchanged logic)
         if (responseBody != null && tooljetRes.getHeaders().getContentType() != null
                 && tooljetRes.getHeaders().getContentType().includes(MediaType.APPLICATION_JSON)) {
             String json = new String(responseBody);
@@ -430,10 +465,9 @@ public class ToolJetBffController {
             }
         }
 
-        // 5. Cleanup Security Headers & Preserve Performance Headers
+        // 6. Cleanup & Headers (Unchanged logic)
         HttpHeaders resHeaders = new HttpHeaders();
 
-        // ✅ FIX: Copy essential performance headers back to the browser
         if (tooljetRes.getHeaders().getContentType() != null) {
             resHeaders.setContentType(tooljetRes.getHeaders().getContentType());
         }
@@ -443,18 +477,15 @@ public class ToolJetBffController {
         if (tooljetRes.getHeaders().getCacheControl() != null) {
             resHeaders.setCacheControl(tooljetRes.getHeaders().getCacheControl());
         }
-        // Required so browser knows how much data to expect
         if (responseBody != null) {
             resHeaders.setContentLength(responseBody.length);
         }
 
-        // Remove restrictive policies
         resHeaders.remove("X-Frame-Options");
         resHeaders.remove("Content-Security-Policy");
         resHeaders.remove("Cross-Origin-Opener-Policy");
         resHeaders.remove("Cross-Origin-Resource-Policy");
 
-        // Add Permissive policies for embedding
         resHeaders.add("X-Frame-Options", "ALLOWALL");
         resHeaders.add("Content-Security-Policy", "frame-ancestors *");
         resHeaders.setAccessControlAllowOrigin("http://localhost:5173");
