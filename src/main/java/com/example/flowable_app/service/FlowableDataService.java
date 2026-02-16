@@ -96,18 +96,33 @@ public class FlowableDataService {
     // =========================================================================
 
     public int update(String tableRef, String conditionSql, Map<String, Object> params, Object... keyValuePairs) {
+        // Log the start of the operation so we know exactly which table and condition are being targeted
+        log.info("UPDATE Executing: Table=[{}], Condition=[{}]", tableRef, conditionSql);
+
         try {
             Map<Field<?>, Object> jooqUpdates = new HashMap<>();
             Map<String, Object> rawMap = toMap(keyValuePairs);
+
+            // Log the actual key-value pairs being updated; this is crucial for debugging data issues
+            // (Using debug level to avoid spamming logs with large data payloads in production)
+            if (log.isDebugEnabled()) {
+                log.debug("UPDATE Payload: {}", rawMap);
+            }
 
             rawMap.forEach((k, v) -> jooqUpdates.put(DSL.field(DSL.name(k)), v));
 
             SqlAndBindings parsed = parseNamedParams(conditionSql, params);
 
-            return dsl.update(resolveTable(tableRef))
-                            .set(jooqUpdates)
-                            .where(DSL.condition(parsed.sql, parsed.bindings))
+            // Store result in a variable first so we can log it before returning
+            int result = dsl.update(resolveTable(tableRef))
+                    .set(jooqUpdates)
+                    .where(DSL.condition(parsed.sql, parsed.bindings))
                     .execute();
+
+            // Log the result count; seeing '0 rows' here is often the fastest way to diagnose "why didn't my data change?"
+            log.info("UPDATE Complete: Modified {} rows in [{}]", result, tableRef);
+
+            return result;
         } catch (Exception e) {
             log.error("update error on table [{}]: {}", tableRef, e.getMessage());
             throw new RuntimeException("Database update failed: " + e.getMessage());
