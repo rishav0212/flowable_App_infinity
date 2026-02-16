@@ -39,7 +39,7 @@ public class FlowableExpressionConfig implements EngineConfigurationConfigurer<S
         Map<Object, Object> allowedBeans = new HashMap<>();
 
         // --- Your Custom Secure Services ---
-        allowedBeans.put("secureWorkflow", flowableWorkflowService);
+        allowedBeans.put("workflow", flowableWorkflowService);
         allowedBeans.put("data", flowableDataService);
         allowedBeans.put("map", flowableMapService);
         allowedBeans.put("user", flowableUserService);
