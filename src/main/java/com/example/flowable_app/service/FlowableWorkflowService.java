@@ -2,8 +2,10 @@ package com.example.flowable_app.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.flowable.engine.RuntimeService;
 import org.flowable.engine.TaskService;
 import org.flowable.engine.delegate.DelegateExecution;
+import org.flowable.engine.runtime.ProcessInstance;
 import org.flowable.task.api.Task;
 import org.springframework.stereotype.Service;
 
@@ -19,6 +21,47 @@ import java.util.Map;
 @Slf4j
 public class FlowableWorkflowService {
     private final TaskService taskService;
+
+    private final RuntimeService runtimeService; // 🟢 Inject RuntimeService
+
+    // ... (Your existing getTaskId / queryTaskIds methods) ...
+
+    /**
+     * 🟢 FUNCTION 3: START PROCESS INSTANCE
+     * Securely starts a new process instance for the current tenant.
+     * * @param execution   Context (for Tenant ID)
+     * @param processKey  The ID of the process to start (e.g. "dispatchProcess")
+     * @param businessKey The unique Order ID (e.g. "ORD-123")
+     * @param variables   Form data/Variables
+     * @return The new ProcessInstance ID
+     */
+    public String startProcess(Object executionObj, String processKey, String businessKey, Map<String, Object> variables) {
+        // 1. Safety Check & Cast
+        if (!(executionObj instanceof DelegateExecution)) {
+            log.error("❌ startProcess called with invalid object type: {}", executionObj.getClass());
+            return null;
+        }
+        DelegateExecution execution = (DelegateExecution) executionObj;
+        String tenantId = execution.getTenantId();
+
+        log.info("🚀 Starting Process [{}] | Key: {} | Tenant: {}", processKey, businessKey, tenantId);
+
+        try {
+            // 2. Build & Start
+            ProcessInstance instance = runtimeService.createProcessInstanceBuilder()
+                    .processDefinitionKey(processKey)
+                    .businessKey(businessKey)
+                    .tenantId(tenantId) // 🔒 Inherit Tenant from Scheduler
+                    .variables(variables)
+                    .start();
+
+            return instance.getId();
+
+        } catch (Exception e) {
+            log.error("❌ Failed to start process: {}", e.getMessage());
+            throw new RuntimeException("Workflow Start Error: " + e.getMessage());
+        }
+    }
 
     /**
      * 🟢 FUNCTION 1: FIND TASK ID (Native API)
