@@ -64,7 +64,7 @@ public class ToolJetBffController {
         String email = userContextService.getCurrentUserEmail();
 
         // 2. 🔍 LOOKUP: Convert "hr-dashboard" -> "uuid-555-777" for THIS tenant
-        String realAppId = appRepository.findAppIdByTenantAndKey(tenantId, appKey)
+        String realAppId = appRepository.findAppIdByTenant(tenantId, appKey)
                 .orElseThrow(() -> new RuntimeException("App '" + appKey + "' not authorized for tenant: " + tenantId));
 
         // 3. Generate Ticket (Now binds tenantId)

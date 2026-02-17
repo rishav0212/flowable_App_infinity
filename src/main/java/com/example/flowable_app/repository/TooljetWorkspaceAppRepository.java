@@ -14,8 +14,7 @@ public interface TooljetWorkspaceAppRepository extends JpaRepository<TooljetWork
     @Query("""
                 SELECT a.tooljetAppUuid 
                 FROM TooljetWorkspaceApp a 
-                WHERE a.appKey = :appKey 
-                  AND a.workspace.tenant.id = :tenantId
+                WHERE a.workspace.tenant.id = :tenantId
             """)
-    Optional<String> findAppIdByTenantAndKey(String tenantId, String appKey);
+    Optional<String> findAppIdByTenant(String tenantId, String appKey);
 }
