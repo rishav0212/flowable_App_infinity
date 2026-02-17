@@ -26,9 +26,13 @@ import java.util.regex.Pattern;
 @Slf4j
 public class FlowableDataService {
 
+    private final DSLContext dsl;
+
     // Regex to find named parameters like :myParam
     private static final Pattern NAMED_PARAM_PATTERN = Pattern.compile("(?<!:):([a-zA-Z0-9_]+)");
+
     // Flowable / engine internal tables — NEVER accessible from low-code DSL
+    // (Consolidated to top for better visibility)
     private static final String[] SYSTEM_TABLE_PREFIXES = {
             "ACT_",
             "FLW_"
@@ -37,12 +41,11 @@ public class FlowableDataService {
     // =========================================================================
     // 📖 READ OPERATIONS
     // =========================================================================
-    private final DSLContext dsl;
 
     public Object selectVal(String tableRef, String columnName, String conditionSql, Map<String, Object> params) {
         try {
             SqlAndBindings parsed = parseNamedParams(conditionSql, params);
-            // FIX: Use dsl.parser().parseField to support functions like COUNT(*) or MAX()
+            // Uses dsl.parser().parseField to support functions like COUNT(*) or MAX()
             return dsl.select(dsl.parser().parseField(columnName))
                     .from(resolveTable(tableRef))
                     .where(DSL.condition(parsed.sql, parsed.bindings))
@@ -68,7 +71,7 @@ public class FlowableDataService {
 
     public List<Object> selectAll(String tableRef, String columnName, String conditionSql, Map<String, Object> params) {
         try {
-            // FIX: Use dsl.parser().parseField to support complex column expressions
+            // Uses dsl.parser().parseField to support complex column expressions
             Field<?> field = dsl.parser().parseField(columnName);
             SqlAndBindings parsed = parseNamedParams(conditionSql, params);
 
@@ -81,10 +84,6 @@ public class FlowableDataService {
             return new ArrayList<>();
         }
     }
-
-    // =========================================================================
-    // ✍️ WRITE OPERATIONS
-    // =========================================================================
 
     public boolean exists(String tableRef, String conditionSql, Map<String, Object> params) {
         try {
@@ -100,28 +99,42 @@ public class FlowableDataService {
         }
     }
 
+    // =========================================================================
+    // ✍️ WRITE OPERATIONS
+    // =========================================================================
+
     public int update(String tableRef, String conditionSql, Map<String, Object> params, Object... keyValuePairs) {
+        // [PRESERVED] Kept Version A's detailed logging.
+        // This is critical for debugging workflows to see exactly what table/condition was hit.
+        log.info("UPDATE Executing: Table=[{}], Condition=[{}]", tableRef, conditionSql);
+
         try {
             Map<Field<?>, Object> jooqUpdates = new HashMap<>();
             Map<String, Object> rawMap = toMap(keyValuePairs);
+
+            // [PRESERVED] Debug log for payload
+            if (log.isDebugEnabled()) {
+                log.debug("UPDATE Payload: {}", rawMap);
+            }
 
             rawMap.forEach((k, v) -> jooqUpdates.put(DSL.field(DSL.name(k)), v));
 
             SqlAndBindings parsed = parseNamedParams(conditionSql, params);
 
-            return dsl.update(resolveTable(tableRef))
+            int result = dsl.update(resolveTable(tableRef))
                     .set(jooqUpdates)
                     .where(DSL.condition(parsed.sql, parsed.bindings))
                     .execute();
+
+            // [PRESERVED] Result count logging
+            log.info("UPDATE Complete: Modified {} rows in [{}]", result, tableRef);
+
+            return result;
         } catch (Exception e) {
             log.error("update error on table [{}]: {}", tableRef, e.getMessage());
             throw new RuntimeException("Database update failed: " + e.getMessage());
         }
     }
-
-    // =========================================================================
-    // 🧠 INTERNAL HELPERS
-    // =========================================================================
 
     public int insert(String tableRef, Object... keyValuePairs) {
         try {
@@ -135,6 +148,10 @@ public class FlowableDataService {
             throw new RuntimeException("Database insert failed: " + e.getMessage());
         }
     }
+
+    // =========================================================================
+    // 🧠 INTERNAL HELPERS
+    // =========================================================================
 
     private Map<String, Object> toMap(Object... args) {
         Map<String, Object> map = new HashMap<>();
@@ -156,10 +173,12 @@ public class FlowableDataService {
             throw new FlowableIllegalArgumentException("Table name cannot be empty");
         }
 
-        // "myTable" is not the same as "MYTABLE" in Postgres if quoted.
+        // [OPTIMIZED FOR POSTGRESQL] Using Version B logic.
+        // Version A forced "toUpperCase()", which breaks mixed-case table names in Postgres (e.g., "myTable").
+        // This logic normalizes for the security check but preserves the original casing for the DB query.
         String normalized = inputName.trim();
 
-        // Update the check to be case-insensitive safe
+        // 🚫 Block Flowable / system tables (Case-Insensitive Check)
         for (String prefix : SYSTEM_TABLE_PREFIXES) {
             if (normalized.toUpperCase().startsWith(prefix)) {
                 throw new FlowableIllegalArgumentException(
@@ -167,7 +186,6 @@ public class FlowableDataService {
                 );
             }
         }
-
 
         // Handle schema-qualified tables (schema.table)
         if (inputName.contains(".")) {
@@ -213,5 +231,4 @@ public class FlowableDataService {
             this.bindings = bindings;
         }
     }
-
 }

@@ -13,4 +13,6 @@ RUN addgroup -S flowable && adduser -S flowable -G flowable
 USER flowable:flowable
 COPY --from=build /app/target/*.jar app.jar
 EXPOSE 8080
+ENV TZ=Asia/Kolkata
+
 ENTRYPOINT ["java", "-jar", "app.jar"]
