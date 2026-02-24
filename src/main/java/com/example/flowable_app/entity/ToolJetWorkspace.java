@@ -24,13 +24,12 @@ public class ToolJetWorkspace {
     @Column(name = "workspace_uuid", nullable = false, unique = true, length = 100)
     private String workspaceUuid;
 
+
     @Column(name = "workspace_slug", nullable = false, length = 100)
     private String slug;
 
     @Column(name = "admin_viewer_email", nullable = false)
     private String viewerEmail;
-
-
 
     @Column(name = "admin_viewer_password", nullable = false)
     private String viewerPassword;

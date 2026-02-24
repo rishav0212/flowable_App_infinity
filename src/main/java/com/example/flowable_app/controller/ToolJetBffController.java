@@ -112,7 +112,7 @@ public class ToolJetBffController {
             tenantId = info.tenantId();
 
             // Fetch the real ID to sync it with the frontend URL
-            String verifiedId = userService.getUserIdByEmail(info.email());
+            String verifiedId = userContextService.getCurrentUserId();
 
             ResponseCookie cookie = ResponseCookie.from("TJ_BFF_SESSION", secureSessionId)
                     .httpOnly(true)
@@ -193,7 +193,7 @@ public class ToolJetBffController {
         String userEmail = sessionData.email();
         String tenantId = sessionData.tenantId();
 
-        String trustedUserId = userService.getUserIdByEmail(userEmail);
+        String trustedUserId = userContextService.getCurrentUserId();
         log.info("👤 [SECURE RUN] Authenticated User: {} (ID: {}) Tenant: {}", userEmail, trustedUserId, tenantId);
 
         try {

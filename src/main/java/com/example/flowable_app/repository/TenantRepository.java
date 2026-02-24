@@ -9,4 +9,7 @@ import java.util.Optional;
 @Repository
 public interface TenantRepository extends JpaRepository<Tenant, String> {
     Optional<Tenant> findById(String id);
+    Optional<Tenant> findBySlug(String slug);
+
+    Optional<Tenant> findBySchemaName(String schemaName);
 }
