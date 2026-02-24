@@ -60,7 +60,7 @@ public class FormIoProxyController {
 
     // =================================================================
     // 🟢 1. GENERIC SQL ENDPOINT (For Select Components)
-    // URL: /api/forms/sql-data?table=infinity.tbl_clients&city=Delhi
+    // URL: /api/forms/sql-data?table=tbl_clients&ORDER_NO_C=123
     // =================================================================
     @RequestMapping(value = "/sql-data", method = RequestMethod.GET)
     public ResponseEntity<List<Map<String, Object>>> getSqlData(HttpServletRequest request) {
@@ -70,7 +70,7 @@ public class FormIoProxyController {
             return ResponseEntity.badRequest().body(null);
         }
 
-        // Convert request params to Map
+        // Convert request params to Map (Exact casing is preserved from the frontend)
         Map<String, String> queryParams = new HashMap<>();
         request.getParameterMap().forEach((key, values) -> {
             if (values != null && values.length > 0) {
@@ -78,9 +78,11 @@ public class FormIoProxyController {
             }
         });
 
-        log.info("🔍 SQL PROXY: Fetching from [{}] | Params: {}", tableName, queryParams);
+        log.info("🔍 SQL PROXY: Fetching from Form/Table [{}] | Params: {}", tableName, queryParams);
 
-        // REUSE: Call the universal fetch method
+        // REUSE: Call the universal fetch method.
+        // The DataMirrorService will automatically route to the correct tenant schema
+        // and safely quote the parameters to protect uppercase constraints.
         List<Map<String, Object>> results = dataMirrorService.fetchTableData(tableName, queryParams);
 
         return ResponseEntity.ok(results);
@@ -115,17 +117,20 @@ public class FormIoProxyController {
                     if (hasSqlTag(formDef)) {
                         String formPath = (String) formDef.get("path");
                         Map<String, String> queryParams = new HashMap<>();
+
+                        // Parameters exact casing preserved from the API request
                         request.getParameterMap().forEach((key, values) -> {
                             if (values != null && values.length > 0) {
                                 queryParams.put(key, values[0]);
                             }
                         });
 
-                        log.info("🏷️ SQL TAG FOUND: Redirecting read for '{}' to SQL Table", formPath);
+                        log.info("🏷️ SQL TAG FOUND: Redirecting read for form '{}' to SQL Database", formPath);
 
                         // REUSE: Calling the SAME universal method as /sql-data
+                        // DataMirrorService handles auto-tenant schema insertion and case sensitivity.
                         List<Map<String, Object>> sqlData =
-                                dataMirrorService.fetchTableData("tbl_"+formPath, queryParams);
+                                dataMirrorService.fetchTableData("tbl_" + formPath, queryParams);
 
                         log.info("✅ Served {} records from SQL for form '{}'", sqlData.size(), formPath);
                         return ResponseEntity.ok(sqlData);
@@ -186,7 +191,7 @@ public class FormIoProxyController {
                                     List<Map<String, Object>> batchPayload =
                                             formSchemaService.buildBatchPayload(buttonProps, data, submissionId);
 
-                                    // 2. Execute
+                                    // 2. Execute Batch via updated Mirror Service
                                     if (!batchPayload.isEmpty()) {
                                         log.info("🪞 MIRRORING: Batch write to {} targets.", batchPayload.size());
                                         dataMirrorService.mirrorBatch(batchPayload);
@@ -197,7 +202,7 @@ public class FormIoProxyController {
                                 }
                             }
                         } catch (Exception e) {
-                            log.error("❌ ASYNC MIRROR FAILED: {}", e.getMessage());
+                            log.error("❌ ASYNC MIRROR FAILED: {}", e.getMessage(), e);
                         }
                     }).start();
                 }
@@ -215,6 +220,7 @@ public class FormIoProxyController {
             authService.invalidateToken();
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         } catch (Exception e) {
+            log.error("❌ PROXY ERROR: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
     }

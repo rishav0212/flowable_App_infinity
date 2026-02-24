@@ -3,6 +3,7 @@ package com.example.flowable_app.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.flowable.common.engine.api.FlowableIllegalArgumentException;
 import org.jooq.Record;
 import org.jooq.*;
 import org.jooq.impl.DSL;
@@ -19,6 +20,8 @@ public class DataMirrorService {
 
     private final DSLContext dsl;
     private final ObjectMapper objectMapper;
+    // 🟢 INJECTED UserContextService to automatically route queries to the current tenant's schema
+    private final UserContextService userContextService;
 
     /**
      * 🟢 BATCH SAVE: Updates multiple tables in ONE transaction.
@@ -37,15 +40,17 @@ public class DataMirrorService {
     }
 
     /**
-     * 🟢 SAVE: Insert/Update with Schema Support
+     * 🟢 SAVE: Insert/Update with Schema Support and Exact Case Matching
      */
     @Transactional
     public void mirrorDataToTable(String targetTableName, Map<String, Object> identifiers, Map<String, Object> data) {
         log.info("🪞 SQL MIRROR: Syncing [{}] | Keys: {}", targetTableName, identifiers);
 
         try {
-            // 1. PARSE SCHEMA & TABLE
-            String schemaName = null;
+            // 1. 🟢 PARSE SCHEMA & TABLE DYNAMICALLY
+            // We use UserContextService to automatically target the correct tenant schema
+            // if no explicit schema is provided in the targetTableName.
+            String schemaName = userContextService.getCurrentTenantSchema();
             String tableName = targetTableName;
 
             if (targetTableName.contains(".")) {
@@ -54,31 +59,36 @@ public class DataMirrorService {
                 tableName = parts[1];
             }
 
-            // 2. FETCH COLUMNS (Fixed for PostgreSQL)
+            log.debug("🛣️ Resolving DB Target -> Schema: [{}], Table: [{}]", schemaName, tableName);
+
+            // 2. 🟢 FETCH COLUMNS EXACT CASE (PostgreSQL Fix)
+            // We query information_schema to find the ACTUAL exact casing of the database columns.
+            // This prevents failures if the DB column is "ORDER_NO_C" but the JSON payload sends "order_no_c".
             var step = dsl.select(
                             DSL.field("column_name", String.class),
                             DSL.field("data_type", String.class)
                     )
                     .from("information_schema.columns")
-                    .where(DSL.field("table_name").eq(tableName));
+                    .where(DSL.field("table_name").eq(tableName))
+                    .and(DSL.field("table_schema").eq(schemaName));
 
-            if (schemaName != null) {
-                step = step.and(DSL.field("table_schema").eq(schemaName));
-            } else {
-                // POSTGRES UPDATE: Use 'current_schema' instead of 'DATABASE()'
-                // In Postgres, tables live in schemas (default: public), not directly in the DB name namespace.
-                step = step.and(DSL.field("table_schema").eq(DSL.function("current_schema", String.class)));
+            Result<Record2<String, String>> dbColumns = step.fetch();
+
+            if (dbColumns.isEmpty()) {
+                log.warn("⚠️ MIRROR ABORTED: Table [{}.{}] does not exist in database.", schemaName, tableName);
+                return;
             }
 
-            Map<String, String> columnTypes = step.fetchMap(
-                    field -> field.get("column_name", String.class).toLowerCase(),
-                    field -> field.get("data_type", String.class).toLowerCase()
-            );
+            // Mappings to easily bridge incoming lowercase keys to actual database exact-case keys
+            Map<String, String> dbExactCaseMap = new HashMap<>();
+            Map<String, String> columnTypes = new HashMap<>();
 
-            if (columnTypes.isEmpty()) {
-                log.warn("⚠️ MIRROR ABORTED: Table [{}{}] does not exist.",
-                        (schemaName != null ? schemaName + "." : ""), tableName);
-                return;
+            for(Record r : dbColumns) {
+                String exactName = r.get("column_name", String.class);
+                String dataType = r.get("data_type", String.class).toLowerCase();
+                // Map the lowercase version to the exact version
+                dbExactCaseMap.put(exactName.toLowerCase(), exactName);
+                columnTypes.put(exactName, dataType);
             }
 
             // 3. PREPARE DATA
@@ -87,12 +97,16 @@ public class DataMirrorService {
             identifiers.forEach(finalData::putIfAbsent);
 
             for (Map.Entry<String, Object> entry : finalData.entrySet()) {
-                String colName = entry.getKey().toLowerCase().replaceAll("[^a-z0-9_]", "");
+                // Normalize incoming key to lowercase to match against our bridge map
+                String incomingCol = entry.getKey().toLowerCase().replaceAll("[^a-z0-9_]", "");
 
-                if (columnTypes.containsKey(colName)) {
+                if (dbExactCaseMap.containsKey(incomingCol)) {
+                    String exactDbColName = dbExactCaseMap.get(incomingCol);
                     Object value = entry.getValue();
-                    String dbType = columnTypes.get(colName);
-                    Field<Object> field = DSL.field(DSL.name(colName));
+                    String dbType = columnTypes.get(exactDbColName);
+
+                    // 🟢 FORCE QUOTING: DSL.name() guarantees PostgreSQL respects the exact casing
+                    Field<Object> field = DSL.field(DSL.name(exactDbColName));
 
                     // POSTGRES UPDATE: Check for 'jsonb' as well as 'json'
                     boolean isJson = "json".equalsIgnoreCase(dbType) || "jsonb".equalsIgnoreCase(dbType);
@@ -103,28 +117,31 @@ public class DataMirrorService {
                         value = value.toString();
                     }
                     writeData.put(field, value);
+                } else {
+                    log.debug("ℹ️ Ignored JSON field [{}] - No matching column found in DB table [{}]", entry.getKey(), tableName);
                 }
             }
 
             // 4. DEFINE SQL TABLE TARGET
-            Table<?> sqlTable = (schemaName != null)
-                    ? DSL.table(DSL.name(schemaName, tableName))
-                    : DSL.table(DSL.name(tableName));
+            // DSL.name() securely quotes the schema and table
+            Table<?> sqlTable = DSL.table(DSL.name(schemaName, tableName));
 
             // 5. CHECK EXISTENCE
             Condition matchCondition = DSL.noCondition();
             boolean validKeyFound = false;
 
             for (Map.Entry<String, Object> idEntry : identifiers.entrySet()) {
-                String col = idEntry.getKey().toLowerCase();
-                if (columnTypes.containsKey(col)) {
-                    matchCondition = matchCondition.and(DSL.field(DSL.name(col)).eq(idEntry.getValue()));
+                String incomingCol = idEntry.getKey().toLowerCase().replaceAll("[^a-z0-9_]", "");
+                if (dbExactCaseMap.containsKey(incomingCol)) {
+                    String exactDbColName = dbExactCaseMap.get(incomingCol);
+                    // Match condition uses rigidly quoted column names
+                    matchCondition = matchCondition.and(DSL.field(DSL.name(exactDbColName)).eq(idEntry.getValue()));
                     validKeyFound = true;
                 }
             }
 
             if (!validKeyFound) {
-                log.error("❌ MIRROR FAILED: No valid keys found for [{}].", targetTableName);
+                log.error("❌ MIRROR FAILED: No valid identifying keys found for table [{}.{}].", schemaName, tableName);
                 return;
             }
 
@@ -132,18 +149,23 @@ public class DataMirrorService {
 
             // 6. EXECUTE UPSERT
             if (exists) {
-                log.info("🔄 UPDATING record in [{}]...", targetTableName);
+                log.info("🔄 UPDATING record in [{}.{}]...", schemaName, tableName);
                 dsl.update(sqlTable).set(writeData).where(matchCondition).execute();
             } else {
-                log.info("✨ INSERTING record into [{}]...", targetTableName);
-                if (columnTypes.containsKey("id") && !writeData.containsKey(DSL.field(DSL.name("id")))) {
-                    writeData.put(DSL.field(DSL.name("id")), UUID.randomUUID().toString());
+                log.info("✨ INSERTING record into [{}.{}]...", schemaName, tableName);
+
+                // Ensure UUID generation relies on the exact casing if the table has an 'id' column
+                if (dbExactCaseMap.containsKey("id")) {
+                    String exactIdCol = dbExactCaseMap.get("id");
+                    if (!writeData.containsKey(DSL.field(DSL.name(exactIdCol)))) {
+                        writeData.put(DSL.field(DSL.name(exactIdCol)), UUID.randomUUID().toString());
+                    }
                 }
                 dsl.insertInto(sqlTable).set(writeData).execute();
             }
 
         } catch (Exception e) {
-            log.error("❌ MIRROR CRASH: {}", e.getMessage(), e);
+            log.error("❌ MIRROR CRASH on target [{}]: {}", targetTableName, e.getMessage(), e);
             throw new RuntimeException("SQL Mirroring Failed", e);
         }
     }
@@ -152,7 +174,8 @@ public class DataMirrorService {
      * 🟢 UNIVERSAL FETCH
      */
     public List<Map<String, Object>> fetchTableData(String targetTableName, Map<String, String> queryParams) {
-        String schemaName = null;
+        // 1. 🟢 PARSE SCHEMA & TABLE DYNAMICALLY
+        String schemaName = userContextService.getCurrentTenantSchema();
         String tableName = targetTableName;
 
         if (targetTableName.contains(".")) {
@@ -161,12 +184,10 @@ public class DataMirrorService {
             tableName = parts[1];
         }
 
-        log.info("🌐 SQL FETCH: Querying [{}.{}]", (schemaName != null ? schemaName : "DEFAULT"), tableName);
+        log.info("🌐 SQL FETCH: Querying [{}.{}]", schemaName, tableName);
 
         SelectQuery<Record> query = dsl.selectQuery();
-        Table<?> table = (schemaName != null)
-                ? DSL.table(DSL.name(schemaName, tableName))
-                : DSL.table(DSL.name(tableName));
+        Table<?> table = DSL.table(DSL.name(schemaName, tableName));
 
         query.addFrom(table);
 
@@ -179,30 +200,42 @@ public class DataMirrorService {
 
         try {
             Result<Record> records = query.fetch();
+            log.debug("✅ FETCH SUCCESS: Retrieved {} records from [{}.{}]", records.size(), schemaName, tableName);
             return mapRecordsToJson(records, queryParams.get("select"));
         } catch (Exception e) {
-            log.error("❌ FETCH FAILED: {}", e.getMessage());
+            log.error("❌ FETCH FAILED on [{}.{}]: {}", schemaName, tableName, e.getMessage(), e);
             return new ArrayList<>();
         }
     }
 
-    // ♻️ REFACTORED FILTER LOGIC (Fixed for PostgreSQL)
+    // ♻️ REFACTORED FILTER LOGIC (Fixed for PostgreSQL & Case Sensitivity)
     private void applyUniversalFilters(SelectQuery<Record> query, Map<String, String> params) {
         params.forEach((key, value) -> {
             if (List.of("limit", "skip", "sort", "select", "table", "formId").contains(key)) return;
 
-            String rawCol = key.replace("data.", "").toLowerCase();
-            String colName = rawCol.replaceAll("__[a-z]+$", "");
+            // 🟢 PRESERVE EXACT CASE: We extract the raw column string from the API parameter
+            // without using .toLowerCase() to ensure PostgreSQL looks for the exact cased column.
+            String rawCol = key.replace("data.", "");
+            String colName = rawCol;
+            String operator = "";
+
+            if (rawCol.contains("__")) {
+                int lastIndex = rawCol.lastIndexOf("__");
+                colName = rawCol.substring(0, lastIndex);
+                operator = rawCol.substring(lastIndex);
+            }
+
+            // DSL.name() securely wraps the column in quotes (e.g. "ORDER_NO_C")
             Field<Object> field = DSL.field(DSL.name(colName));
 
             // POSTGRES UPDATE: Use '~*' (Case insensitive Regex) instead of MySQL 'REGEXP'
-            if (key.endsWith("__regex")) query.addConditions(DSL.condition("{0} ~* ?", field, value));
-            else if (key.endsWith("__gt")) query.addConditions(field.gt(value));
-            else if (key.endsWith("__gte")) query.addConditions(field.ge(value));
-            else if (key.endsWith("__lt")) query.addConditions(field.lt(value));
-            else if (key.endsWith("__lte")) query.addConditions(field.le(value));
-            else if (key.endsWith("__ne")) query.addConditions(field.ne(value));
-            else if (key.endsWith("__in")) query.addConditions(field.in(Arrays.asList(value.split(","))));
+            if ("__regex".equals(operator)) query.addConditions(DSL.condition("{0} ~* ?", field, value));
+            else if ("__gt".equals(operator)) query.addConditions(field.gt(value));
+            else if ("__gte".equals(operator)) query.addConditions(field.ge(value));
+            else if ("__lt".equals(operator)) query.addConditions(field.lt(value));
+            else if ("__lte".equals(operator)) query.addConditions(field.le(value));
+            else if ("__ne".equals(operator)) query.addConditions(field.ne(value));
+            else if ("__in".equals(operator)) query.addConditions(field.in(Arrays.asList(value.split(","))));
             else query.addConditions(field.eq(value));
         });
     }
@@ -211,14 +244,18 @@ public class DataMirrorService {
         String sortParam = params.get("sort");
         if (sortParam != null && !sortParam.isEmpty()) {
             SortOrder order = sortParam.startsWith("-") ? SortOrder.DESC : SortOrder.ASC;
-            String colName = (sortParam.startsWith("-") ? sortParam.substring(1) : sortParam)
-                    .replace("data.", "").toLowerCase().replaceAll("[^a-z0-9_]", "");
+
+            // 🟢 PRESERVE EXACT CASE for sorting to avoid "column does not exist" crashes
+            String colName = sortParam.startsWith("-") ? sortParam.substring(1) : sortParam;
+            colName = colName.replace("data.", "");
 
             query.addOrderBy(DSL.field(DSL.name(colName)).sort(order));
         }
     }
 
     private List<Map<String, Object>> mapRecordsToJson(Result<Record> records, String selectParam) {
+        // Kept lowercasing here ONLY for the API requested fields, since API requested fields
+        // are often lowercased natively by JavaScript frameworks.
         List<String> allowedFields = (selectParam != null)
                 ? Arrays.stream(selectParam.split(","))
                 .map(s -> s.replace("data.", "").trim().toLowerCase())
@@ -245,7 +282,9 @@ public class DataMirrorService {
             else if (record.field("created") != null) submission.put("created", record.get("created"));
 
             for (org.jooq.Field<?> field : record.fields()) {
+                // 🟢 Preserves exact case retrieved straight from the Database
                 String name = field.getName();
+
                 if (List.of("id", "submission_id", "created_at").contains(name.toLowerCase())) continue;
 
                 if (allowedFields == null || allowedFields.contains(name.toLowerCase())) {
