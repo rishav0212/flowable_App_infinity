@@ -27,11 +27,13 @@ public class JwtUtils {
     }
 
 
-    public String generateToken(String internalId, String email, String name, String tenantId) {
+    public String generateToken(String internalId, String email, String name, String tenantId, String tenantSlug, String schemaName) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("id", internalId);
         claims.put("name", name);
         claims.put("tenantId", tenantId); // 🟢 Store Tenant ID
+        claims.put("tenantSlug", tenantSlug); // 🟢 Store Slug
+        claims.put("schemaName", schemaName); // 🟢 Store Schema Name
 
         return Jwts.builder()
                 .setClaims(claims) // Use setClaims to add the map

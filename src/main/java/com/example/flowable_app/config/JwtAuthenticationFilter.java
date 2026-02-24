@@ -56,7 +56,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         "id", claims.get("id"),
                         "name", claims.get("name"),
                         "email", claims.getSubject(),
-                        "tenantId", claims.get("tenantId")
+                        "tenantId", claims.get("tenantId"),
+                        "tenantSlug", claims.get("tenantSlug"), // 🟢 Added
+                        "schemaName", claims.get("schemaName")  // 🟢 Added
                 );
 
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(

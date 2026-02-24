@@ -46,6 +46,15 @@ public class UserContextService {
     }
 
     /**
+     * @return The schema name associated with the tenant, if available in the JWT.
+     */
+    public String getCurrentTenantSchema() {
+        Map<String, Object> claims = getPrincipalClaims();
+        return (String) claims.get("schemaName"); // Assuming tenantSlug is the schema name
+    }
+
+
+    /**
      * Helper to extract the claims Map safely.
      */
     @SuppressWarnings("unchecked")
@@ -63,4 +72,5 @@ public class UserContextService {
 
         return (Map<String, Object>) auth.getPrincipal();
     }
+
 }

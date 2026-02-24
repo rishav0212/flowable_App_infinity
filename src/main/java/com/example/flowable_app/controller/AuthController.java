@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -18,6 +19,13 @@ import java.util.Map;
 @RequestMapping("/api/auth")
 @Slf4j
 public class AuthController {
+
+    // Hardcoded list of admin emails for temporary role-based access control
+    // We are implementing this to easily bypass frontend locks and prepare for backend role validations
+    private static final List<String> SUPER_ADMIN_EMAILS = List.of(
+            "rishavj0212@gmail.com", // Replace with your actual admin email
+            "sandeep@saarbiotech.com"  // Replace with your actual admin email
+    );
 
     /**
      * Retrieves the current authenticated user's profile based on the JWT Principal.
@@ -54,18 +62,28 @@ public class AuthController {
             String userId = (String) details.get("id");
             String email = (String) details.get("email");
             String name = (String) details.get("name");
-            String tenantId = (String) details.get("tenantId");
+            String tenantId = (String) details.get("tenantSlug");
 
             log.info("👤 [Auth] Profile retrieved successfully for User: [{}] ({})", userId, email);
 
-            // 3. Return structured response including all new fields
+            // 3. Dynamic Role Assignment based on hardcoded emails
+            // Everyone gets ROLE_USER by default. If their email is in the admin list, they also get ROLE_SUPER_ADMIN.
+            List<Map<String, String>> authorities = new ArrayList<>();
+            authorities.add(Map.of("authority", "ROLE_USER"));
+
+            if (email != null && SUPER_ADMIN_EMAILS.contains(email)) {
+                authorities.add(Map.of("authority", "ROLE_SUPER_ADMIN"));
+                log.info("🛡️ [Auth] Assigned ROLE_SUPER_ADMIN to user: {}", email);
+            }
+
+            // 4. Return structured response including all new fields and dynamic authorities
             return ResponseEntity.ok(Map.of(
                     "username", userId, // 🟢 Frontend uses this for Task fetching
                     "id", userId,
                     "email", email,
                     "name", name,
                     "tenantId", tenantId,
-                    "authorities", List.of(Map.of("authority", "ROLE_USER")),
+                    "authorities", authorities,
                     "authenticated", true
             ));
 

@@ -1,6 +1,10 @@
 package com.example.flowable_app.config;
 
+import com.example.flowable_app.entity.Tenant;
+import com.example.flowable_app.repository.TenantRepository;
 import com.example.flowable_app.service.AllowedUserService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
@@ -20,6 +24,8 @@ import java.util.Map;
 public class CustomOAuth2UserService extends DefaultOAuth2UserService {
 
     private final AllowedUserService allowedUserService;
+    private final HttpServletRequest request;
+    private final TenantRepository tenantRepository;
 
 
     @Override
@@ -27,8 +33,14 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         OAuth2User googleUser = super.loadUser(userRequest);
         String email = googleUser.getAttribute("email");
         log.info("🌐 Google Auth: Received email [{}] from Google", email); // 👈 Added
+        HttpSession session = request.getSession(false);
+        String tenantSlug = session != null ? (String) session.getAttribute("WORKFLOW_TENANT") : null;
+        Tenant tenant = tenantRepository.findBySlug(tenantSlug)
+                .orElseThrow(() -> new OAuth2AuthenticationException(new OAuth2Error("access_denied"),
+                        "Invalid Tenant."));
 
-        String internalUserId = allowedUserService.getUserIdByEmail(email);
+        // 🟢 CHANGE 4: Pass the schema name securely to the AllowedUserService
+        String internalUserId = allowedUserService.getUserIdByEmail(email, tenant.getSchemaName());
         if (internalUserId == null) {
             log.error("🚫 Access Denied: Email [{}] not found in allowed mapping table", email); // 👈 Added
             throw new OAuth2AuthenticationException(new OAuth2Error("access_denied"),
