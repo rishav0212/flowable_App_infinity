@@ -72,33 +72,36 @@ public class TaskOperationController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10000") int size
     ) {
-
-        String userId = userContextService.getCurrentUserId();     // 🔒 Securely fetched from JWT
-        String tenantId = userContextService.getCurrentTenantId(); // 🔒 Securely fetched from JWT
+        String userId = userContextService.getCurrentUserId();
+        String tenantId = userContextService.getCurrentTenantId();
 
         log.info("mailbox: Fetching tasks for user [{}] in tenant [{}]", userId, tenantId);
 
-        // 🔒 SECURITY: We force the filter to the current user and tenant
+        // 1. Fetch the entities from Flowable
         List<Task> tasks = taskService.createTaskQuery()
                 .taskCandidateOrAssigned(userId)
                 .taskTenantId(tenantId)
                 .orderByTaskCreateTime().desc()
                 .listPage(page * size, size);
 
-//        List<Map<String, Object>> response = tasks.stream().map(task -> {
-//            Map<String, Object> map = new HashMap<>();
-//            map.put("id", task.getId());
-//            map.put("name", task.getName());
-//            map.put("assignee", task.getAssignee());
-//            map.put("createTime", task.getCreateTime());
-//            map.put("dueDate", task.getDueDate());
-//            map.put("processDefinitionId", task.getProcessDefinitionId());
-//            map.put("processInstanceId", task.getProcessInstanceId());
-//            map.put("priority", task.getPriority());
-//            return map;
-//        }).collect(Collectors.toList());
+        // 2. Convert to a List of Maps immediately to prevent lazy-loading errors
+        List<Map<String, Object>> response = tasks.stream().map(task -> {
+            Map<String, Object> map = new HashMap<>();
+            map.put("id", task.getId());
+            map.put("name", task.getName());
+            map.put("assignee", task.getAssignee());
+            map.put("createTime", task.getCreateTime());
+            map.put("dueDate", task.getDueDate());
+            map.put("processDefinitionId", task.getProcessDefinitionId());
+            map.put("processInstanceId", task.getProcessInstanceId());
+            map.put("taskDefinitionKey", task.getTaskDefinitionKey());
+            map.put("priority", task.getPriority());
+            map.put("description", task.getDescription());
+            return map;
+        }).toList();
 
-        return ResponseEntity.ok(tasks);
+        // 3. Return the plain Map list which Jackson can serialize safely
+        return ResponseEntity.ok(response);
     }
 
     // =========================================================================
