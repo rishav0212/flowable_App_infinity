@@ -80,7 +80,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jooq</artifactId>
         </dependency>
-
+        <dependency>
+            <groupId>org.flowable</groupId>
+            <artifactId>flowable-task-service-api</artifactId>
+            <version>7.0.0</version>
+        </dependency>
         <dependency>
             <groupId>org.apache.groovy</groupId>
             <artifactId>groovy-jsr223</artifactId>
