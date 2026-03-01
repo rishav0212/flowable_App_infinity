@@ -1,9 +1,5 @@
 package com.example.flowable_app.service;
 
-import org.flowable.common.engine.impl.context.Context;
-import org.flowable.common.engine.impl.interceptor.CommandContext;
-import org.flowable.engine.impl.util.CommandContextUtil;
-import org.flowable.job.service.impl.persistence.entity.JobEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -12,102 +8,69 @@ import java.util.Map;
 
 /**
  * 🟢 USER CONTEXT SERVICE
- * Provides identity and tenant details. Supports both REST requests (via SecurityContext)
- * and Background Async Tasks (via Flowable CommandContext).
+ * A centralized service to retrieve the currently authenticated user's identity
+ * and tenant details from the Security Context.
  */
 @Service
 public class UserContextService {
 
+    /**
+     * @return The Tenant ID (e.g., "acme-corp") from the JWT.
+     * @throws SecurityException if the user is not authenticated or lacks a tenant.
+     */
     public String getCurrentTenantId() {
-        try {
-            Map<String, Object> claims = getPrincipalClaims();
-            String tenantId = (String) claims.get("tenantId");
-            if (tenantId != null && !tenantId.trim().isEmpty()) {
-                return tenantId;
-            }
-        } catch (Exception e) {
-            // Fallback for Async Tasks: Extract tenant from Flowable's engine context.
-            String flowableTenantId = getTenantFromFlowableContext();
-            if (flowableTenantId != null) return flowableTenantId;
-        }
-        throw new SecurityException("No Tenant context available in Security or Engine.");
-    }
+        Map<String, Object> claims = getPrincipalClaims();
+        String tenantId = (String) claims.get("tenantId");
 
-    public String getCurrentUserId() {
-        try {
-            Map<String, Object> claims = getPrincipalClaims();
-            Object id = claims.get("id");
-            return id != null ? id.toString() : "anonymous";
-        } catch (Exception e) {
-            return "system"; // Background tasks are performed by the system
+        if (tenantId == null || tenantId.trim().isEmpty()) {
+            throw new SecurityException("Access Denied: No Tenant ID found in current session.");
         }
+        return tenantId;
     }
 
     /**
-     * 🟢 FIXED: RESTORED MISSING METHOD
-     * @return The User's Email from the JWT or null if not available.
+     * @return The User ID (e.g., "Rishab_J") from the JWT.
+     */
+    public String getCurrentUserId() {
+        Map<String, Object> claims = getPrincipalClaims();
+        Object id = claims.get("id");
+        return id != null ? id.toString() : "anonymous";
+    }
+
+    /**
+     * @return The User's Email from the JWT.
      */
     public String getCurrentUserEmail() {
-        try {
-            Map<String, Object> claims = getPrincipalClaims();
-            return (String) claims.get("email");
-        } catch (Exception e) {
-            // Async threads do not have an email context
-            return null;
-        }
+        Map<String, Object> claims = getPrincipalClaims();
+        return (String) claims.get("email");
     }
 
+    /**
+     * @return The schema name associated with the tenant, if available in the JWT.
+     */
     public String getCurrentTenantSchema() {
-        try {
-            Map<String, Object> claims = getPrincipalClaims();
-            String schema = (String) claims.get("schemaName");
-            if (schema != null) return schema;
-        } catch (Exception e) {
-            // Complex Functionality: In background threads, we use the tenantId as the schema name.
-            // This is critical for the Multi-tenant DB routing in FlowableDataService.
-            String flowableTenantId = getTenantFromFlowableContext();
-            if (flowableTenantId != null) return flowableTenantId;
-        }
-        return "public"; // Final safety fallback
+        Map<String, Object> claims = getPrincipalClaims();
+        return (String) claims.get("schemaName"); // Assuming tenantSlug is the schema name
     }
 
+
+    /**
+     * Helper to extract the claims Map safely.
+     */
     @SuppressWarnings("unchecked")
     private Map<String, Object> getPrincipalClaims() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated() || !(auth.getPrincipal() instanceof Map)) {
+
+        if (auth == null || !auth.isAuthenticated()) {
             throw new SecurityException("No authentication data found.");
         }
+
+        if (!(auth.getPrincipal() instanceof Map)) {
+            // This happens if the Principal is a String "anonymousUser" or similar
+            throw new SecurityException("Invalid Principal Type. Expected Map from JWT.");
+        }
+
         return (Map<String, Object>) auth.getPrincipal();
     }
 
-    /**
-     * Extracts tenant info from the active engine thread.
-     * Handles Async Service Tasks by checking Executions and Job attributes.
-     */
-    private String getTenantFromFlowableContext() {
-        try {
-            CommandContext commandContext = Context.getCommandContext();
-            if (commandContext != null) {
-                // 1. Try to find an active execution in the current command scope
-                var executionEntityManager = CommandContextUtil.getExecutionEntityManager(commandContext);
-                if (executionEntityManager != null) {
-                    // Check the current execution's tenant
-                    String tenantId = executionEntityManager.findChildExecutionsByProcessInstanceId(null)
-                            .stream()
-                            .map(e -> e.getTenantId())
-                            .filter(t -> t != null && !t.isEmpty())
-                            .findFirst()
-                            .orElse(null);
-                    if (tenantId != null) return tenantId;
-                }
-
-                // 2. Check if a Job triggered this (typical for Async Service Tasks)
-                Object job = commandContext.getAttribute("job");
-                if (job instanceof JobEntity) {
-                    return ((JobEntity) job).getTenantId();
-                }
-            }
-        } catch (Exception ignored) {}
-        return null;
-    }
 }
