@@ -111,8 +111,19 @@ public class DataMirrorService {
                     // POSTGRES UPDATE: Check for 'jsonb' as well as 'json'
                     boolean isJson = "json".equalsIgnoreCase(dbType) || "jsonb".equalsIgnoreCase(dbType);
 
-                    if (isJson && (value instanceof Map || value instanceof List)) {
-                        try { value = objectMapper.writeValueAsString(value); } catch (Exception e) {}
+                    if (isJson) {
+                        try {
+                            String jsonStr = (value instanceof Map || value instanceof List)
+                                    ? objectMapper.writeValueAsString(value) : String.valueOf(value);
+
+                            // 🟢 DYNAMIC JSON CASTING:
+                            // We wrap the string in jOOQ's native JSON/JSONB types based on DB metadata.
+                            // This satisfies PostgreSQL's strict typing and prevents "bad SQL grammar" errors.
+                            value = "jsonb".equalsIgnoreCase(dbType) ? JSONB.valueOf(jsonStr) : JSON.valueOf(jsonStr);
+
+                        } catch (Exception e) {
+                            log.error("Dynamic JSON conversion failed for field [{}]: {}", exactDbColName, e.getMessage());
+                        }
                     } else if (value instanceof Map || value instanceof List) {
                         value = value.toString();
                     }
