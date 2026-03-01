@@ -43,6 +43,20 @@ public class UserContextService {
         }
     }
 
+    /**
+     * 🟢 FIXED: RESTORED MISSING METHOD
+     * @return The User's Email from the JWT or null if not available.
+     */
+    public String getCurrentUserEmail() {
+        try {
+            Map<String, Object> claims = getPrincipalClaims();
+            return (String) claims.get("email");
+        } catch (Exception e) {
+            // Async threads do not have an email context
+            return null;
+        }
+    }
+
     public String getCurrentTenantSchema() {
         try {
             Map<String, Object> claims = getPrincipalClaims();
