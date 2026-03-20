@@ -1,6 +1,8 @@
 package com.example.flowable_app.controller;
 
+import com.example.flowable_app.entity.Tenant;
 import com.example.flowable_app.entity.ToolJetWorkspace;
+import com.example.flowable_app.repository.TenantRepository;
 import com.example.flowable_app.repository.ToolJetWorkspaceRepository;
 import com.example.flowable_app.repository.TooljetWorkspaceAppRepository;
 import com.example.flowable_app.service.AllowedUserService;
@@ -40,6 +42,7 @@ public class ToolJetBffController {
     // 🟢 New Repositories for Dynamic Lookup
     private final TooljetWorkspaceAppRepository appRepository;
     private final ToolJetWorkspaceRepository workspaceRepository;
+    private final TenantRepository tenantRepository;
 
     private final RestTemplate restTemplate = new RestTemplate();
     private final JdbcTemplate jdbcTemplate;
@@ -48,14 +51,19 @@ public class ToolJetBffController {
     @Value("${tooljet.internal.url}")
     private String tooljetUrl;
 
-    // 🔴 Removed hardcoded organizationId. We now look this up per tenant.
+    @GetMapping("/api/tooljet/my-apps")
+    public ResponseEntity<?> getMyApps() {
+        String tenantId = userContextService.getCurrentTenantId();
+        var apps = appRepository.findAllByTenantId(tenantId);
+        return ResponseEntity.ok(apps);
+    }
 
     /**
-     * Step 1: Frontend asks for a ticket using a generic "Key" (e.g. "hr-dashboard")
+     * Step 1: Frontend asks for a ticket using the actual ToolJet UUID
      */
     @PostMapping("/api/tooljet/embed-ticket")
     public ResponseEntity<?> getTicket(
-            @RequestParam String appKey, // 🟢 Accepts 'appKey' instead of raw 'appId'
+            @RequestParam String appId, // 🟢 Accepts 'appId' (UUID) instead of 'appKey'
             @AuthenticationPrincipal Map<String, Object> details) {
 
         // 1. Identify User & Tenant from Context
@@ -63,18 +71,22 @@ public class ToolJetBffController {
         String userId = userContextService.getCurrentUserId();
         String email = userContextService.getCurrentUserEmail();
 
-        // 2. 🔍 LOOKUP: Convert "hr-dashboard" -> "uuid-555-777" for THIS tenant
-        String realAppId = appRepository.findAppIdByTenant(tenantId, appKey)
-                .orElseThrow(() -> new RuntimeException("App '" + appKey + "' not authorized for tenant: " + tenantId));
+        // 2. 🔒 SECURITY CHECK: Verify this UUID actually belongs to this Tenant
+        boolean isAllowed = appRepository.isAppAllowedForTenant(tenantId, appId);
 
-        // 3. Generate Ticket (Now binds tenantId)
-        String ticket = authService.generateTicket(userId, email, realAppId, tenantId);
+        if (!isAllowed) {
+            throw new RuntimeException("Access Denied: App " + appId + " is not authorized for tenant: " + tenantId);
+        }
+
+        // 3. Generate Ticket (Now binds tenantId and appId securely)
+        String ticket = authService.generateTicket(userId, email, appId, tenantId);
 
         return ResponseEntity.ok(Map.of(
                 "ticket", ticket,
-                "iframeUrl", "/tooljet/ticket/" + ticket + "/applications/" + realAppId
+                "iframeUrl", "/tooljet/ticket/" + ticket + "/applications/" + appId
         ));
     }
+
 
     @RequestMapping(
             value = {
@@ -112,7 +124,8 @@ public class ToolJetBffController {
             tenantId = info.tenantId();
 
             // Fetch the real ID to sync it with the frontend URL
-            String verifiedId = userContextService.getCurrentUserId();
+//            String verifiedId = userContextService.getCurrentUserId();
+            String verifiedId = info.userId();
 
             ResponseCookie cookie = ResponseCookie.from("TJ_BFF_SESSION", secureSessionId)
                     .httpOnly(true)
@@ -192,8 +205,10 @@ public class ToolJetBffController {
         }
         String userEmail = sessionData.email();
         String tenantId = sessionData.tenantId();
+        Tenant tenant = tenantRepository.findById(tenantId).orElseThrow();
+        String schemaName = tenant.getSchemaName();
 
-        String trustedUserId = userContextService.getCurrentUserId();
+        String trustedUserId = userService.getUserIdByEmail(userEmail, schemaName);
         log.info("👤 [SECURE RUN] Authenticated User: {} (ID: {}) Tenant: {}", userEmail, trustedUserId, tenantId);
 
         try {
@@ -358,7 +373,9 @@ public class ToolJetBffController {
             headers.add("x-tooljet-workspace-id", config.getWorkspaceUuid()); // 🟢 Dynamic
             headers.setContentType(MediaType.APPLICATION_JSON);
 
-            ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), Map.class);
+            ResponseEntity<Map>
+                    response =
+                    restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), Map.class);
             Map<String, Object> body = response.getBody();
 
             if (body != null) {
@@ -384,13 +401,25 @@ public class ToolJetBffController {
 
     private SqlAndBindings convertToPreparedSql(String tooljetSql, Map<String, Object> params) {
         if (tooljetSql == null) return new SqlAndBindings("", new Object[0]);
-        Pattern pattern = Pattern.compile("\\{\\{\\s*params\\.(\\w+)\\s*\\}\\}");
+
+        // 🟢 ENHANCED REGEX:
+        // Matches {{params.x}}, {{variables.x}}, {{components.table1.pageOffset}}, etc.
+        // It captures the very last word after the dot as Group 1 (e.g., "current_offset").
+        Pattern pattern = Pattern.compile("\\{\\{\\s*(?:[\\w\\[\\]]+\\.)*(\\w+)\\s*\\}\\}");
         Matcher matcher = pattern.matcher(tooljetSql);
+
         List<Object> argsList = new ArrayList<>();
         StringBuffer sb = new StringBuffer();
+
         while (matcher.find()) {
-            String paramName = matcher.group(1);
-            matcher.appendReplacement(sb, "?");
+            String paramName = matcher.group(1); // Extracts the key, e.g., 'current_offset'
+            matcher.appendReplacement(sb, "?"); // Replace with Postgres placeholder
+
+            // 🛡️ Log a warning if the frontend didn't send this parameter
+            if (!params.containsKey(paramName)) {
+                log.warn("⚠️ [SECURE RUN] Missing parameter in payload: '{}'. Value will be null.", paramName);
+            }
+
             argsList.add(params.get(paramName));
         }
         matcher.appendTail(sb);

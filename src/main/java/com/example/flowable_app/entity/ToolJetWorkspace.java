@@ -1,5 +1,6 @@
 package com.example.flowable_app.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -19,6 +20,7 @@ public class ToolJetWorkspace {
     // 🔗 Link to Tenant (One-to-One)
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tenant_id", referencedColumnName = "tenant_id", nullable = false, unique = true)
+
     private Tenant tenant;
 
     @Column(name = "workspace_uuid", nullable = false, unique = true, length = 100)

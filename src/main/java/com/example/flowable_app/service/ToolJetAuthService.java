@@ -149,7 +149,7 @@ public class ToolJetAuthService {
                     .orElseThrow(() -> new RuntimeException("No ToolJet Config found for tenant: " + tenantId));
 
             // 2. Construct the Login URL using the Tenant's specific Workspace UUID
-            String loginUrl = String.format("%s/api/authenticate/%s", tooljetUrl, config.getWorkspaceUuid());
+            String loginUrl = String.format("%s/api/authenticate", tooljetUrl);
             log.info("🔐 Authenticating Tenant [{}] to Workspace [{}]...", tenantId, config.getSlug());
 
             // 3. Prepare Login Payload

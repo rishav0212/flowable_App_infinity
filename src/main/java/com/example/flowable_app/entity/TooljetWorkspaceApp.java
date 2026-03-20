@@ -1,5 +1,6 @@
 package com.example.flowable_app.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -24,6 +25,7 @@ public class TooljetWorkspaceApp {
     // 🔗 Link to Workspace
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "workspace_id", nullable = false)
+    @JsonIgnore
     private ToolJetWorkspace workspace;
 
 
