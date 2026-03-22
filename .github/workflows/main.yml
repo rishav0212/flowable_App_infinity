@@ -60,10 +60,6 @@ jobs:
 
           # ---------------- DEVELOPMENT (OTHER) ----------------
           else
-            echo "⚠️ Branch is ${{ github.ref_name }} (Development)"
-          
-            # Service & Image Identity
-            echo "SERVICE_NAME=infinity-plus-services-dev" >> $GITHUB_ENV
             echo "IMAGE_NAME=infinity-plus-services-dev" >> $GITHUB_ENV
             echo "IMAGE_TAG=latest" >> $GITHUB_ENV
 
@@ -73,6 +69,10 @@ jobs:
             echo "MAX_INSTANCES=1" >> $GITHUB_ENV
 
             # URLs for Development
+            echo "⚠️ Branch is ${{ github.ref_name }} (Development)"
+          
+            # Service & Image Identity
+            echo "SERVICE_NAME=infinity-plus-services-dev" >> $GITHUB_ENV
             # 🟢 NOTE: Ensure these URLs exist or change them to the auto-generated Cloud Run URL later
             echo "ENV_FRONTEND_URL=https://infinity-plus-saar-git-developer-ed048f-rishav-jindals-projects.vercel.app/" >> $GITHUB_ENV
             echo "ENV_BACKEND_URL=https://infinity-plus-services-dev-493376716946.asia-south2.run.app" >> $GITHUB_ENV
@@ -122,7 +122,7 @@ jobs:
             --allow-unauthenticated
             --port=8080
             --service-account=${{ env.RUNTIME_SERVICE_ACCOUNT }}
-            --add-cloudsql-instances=myfirsttestproject-456102:asia-south2:infinity-production
+            --add-cloudsql-instances=myfirsttestproject-456102:asia-south2:infinity-plus
             --memory=${{ env.MEMORY }}
             --cpu=${{ env.CPU }}
             --max-instances=${{ env.MAX_INSTANCES }}
