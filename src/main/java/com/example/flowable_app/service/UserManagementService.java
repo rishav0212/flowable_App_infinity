@@ -119,4 +119,20 @@ public class UserManagementService {
                 .onConflictDoNothing()
                 .execute();
     }
+
+    // Fetch a simple list of role IDs assigned to a user
+    public List<String> getUserRoles(String userId, String schema) {
+        return dsl.select(field("role_id", String.class))
+                .from(table(name(schema, "tbl_user_roles")))
+                .where(field("user_id").eq(userId))
+                .fetchInto(String.class);
+    }
+
+    // Remove the assignment from the relational database
+    public void removeRoleFromUser(String targetUserId, String roleId, String schema) {
+        dsl.deleteFrom(table(name(schema, "tbl_user_roles")))
+                .where(field("user_id").eq(targetUserId))
+                .and(field("role_id").eq(roleId))
+                .execute();
+    }
 }

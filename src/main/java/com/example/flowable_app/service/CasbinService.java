@@ -17,7 +17,7 @@ public class CasbinService {
 
     private final CasbinConfig casbinConfig;
 
-    // 1. Core Security Check
+    // 1. Core Security Check (Used by Aspects & explicit permission checks)
     public boolean canDo(String userId, String tenantId, String schemaName, String resource, String action) {
         Enforcer enforcer = casbinConfig.getEnforcer(schemaName);
         boolean allowed = enforcer.enforce(userId, tenantId, resource, action);
@@ -25,7 +25,7 @@ public class CasbinService {
         return allowed;
     }
 
-    // 2. Build the Flat Map for ToolJet UI Visibility
+    // 2. Build the Flat Map for ToolJet & React UI Visibility
     public Map<String, Boolean> getPermissionMap(String userId, String tenantId, String schemaName, List<String> allResourceKeys) {
         Enforcer enforcer = casbinConfig.getEnforcer(schemaName);
         Map<String, Boolean> map = new LinkedHashMap<>();
@@ -35,7 +35,7 @@ public class CasbinService {
         return map;
     }
 
-    // 3. Admin Tools (Assign Roles & Policies)
+    // 3. Admin Tools: Assign or Remove Roles from Users
     public void assignRoleToUser(String userId, String roleId, String tenantId, String schemaName) {
         casbinConfig.getEnforcer(schemaName).addRoleForUserInDomain(userId, roleId, tenantId);
     }
@@ -44,6 +44,7 @@ public class CasbinService {
         casbinConfig.getEnforcer(schemaName).deleteRoleForUserInDomain(userId, roleId, tenantId);
     }
 
+    // 4. Admin Tools: Grant or Revoke specific Permissions to Roles
     public void grantPermissionToRole(String roleId, String tenantId, String schemaName, String resource, String action) {
         casbinConfig.getEnforcer(schemaName).addPolicy(roleId, tenantId, resource, action);
     }
@@ -52,10 +53,9 @@ public class CasbinService {
         casbinConfig.getEnforcer(schemaName).removePolicy(roleId, tenantId, resource, action);
     }
 
-
-    // 4. Fetch existing policies for the Matrix UI
+    // 5. Admin UI: Fetch existing policies for the Checkbox Matrix
     public List<List<String>> getPoliciesForRole(String roleId, String tenantId, String schemaName) {
-        // getFilteredPolicy(0, ...) means: "Search starting at index 0 (v0/Subject) for roleId, and index 1 (v1/Domain) for tenantId"
+        // getFilteredPolicy(0, ...) searches starting at index 0 (v0/Subject) for roleId, and index 1 for tenantId
         return casbinConfig.getEnforcer(schemaName).getFilteredPolicy(0, roleId, tenantId);
     }
 }

@@ -51,3 +51,4 @@ public class FlowableExpressionConfig implements EngineConfigurationConfigurer<S
         engineConfiguration.setBeans(allowedBeans);
     }
 }
+

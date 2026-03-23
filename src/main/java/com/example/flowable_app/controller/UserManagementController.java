@@ -131,4 +131,22 @@ public class UserManagementController {
         );
         return ResponseEntity.ok(Map.of("message", "Permission revoked"));
     }
+
+    @GetMapping("/users/{userId}/roles")
+    public ResponseEntity<?> getUserRoles(@PathVariable String userId) {
+        return ResponseEntity.ok(userMgmtService.getUserRoles(userId, userContextService.getCurrentTenantSchema()));
+    }
+
+    @DeleteMapping("/users/{userId}/roles/{roleId}")
+    public ResponseEntity<?> removeRole(@PathVariable String userId, @PathVariable String roleId) {
+        String schema = userContextService.getCurrentTenantSchema();
+        String tenantId = userContextService.getCurrentTenantId();
+
+        // 1. Remove from relational DB
+        userMgmtService.removeRoleFromUser(userId, roleId, schema);
+        // 2. Tell Casbin to remove the mapping
+        casbinService.removeRoleFromUser(userId, roleId, tenantId, schema);
+
+        return ResponseEntity.ok(Map.of("message", "Role removed from user"));
+    }
 }
