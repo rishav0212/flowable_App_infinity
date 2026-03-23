@@ -129,8 +129,8 @@ public class ToolJetBffController {
 
             ResponseCookie cookie = ResponseCookie.from("TJ_BFF_SESSION", secureSessionId)
                     .httpOnly(true)
-                    .secure(false)
-                    .sameSite("Lax")
+                    .secure(true)
+                    .sameSite("None")
                     .path("/")
                     .maxAge(3600)
                     .build();
