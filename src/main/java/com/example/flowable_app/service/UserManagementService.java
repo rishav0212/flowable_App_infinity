@@ -26,16 +26,29 @@ public class UserManagementService {
 
     @Transactional
     public void createUser(String userId, String email, String firstName, String lastName, Map<String, Object> metadata, String schema, String adminUserId) {
+
+        // 🛡️ CHECK FOR DUPLICATES FIRST
+        boolean exists = dsl.fetchExists(
+                dsl.selectFrom(table(name(schema, "tbl_users")))
+                        .where(field("user_id").eq(userId)
+                                .or(field("email").eq(email)))
+        );
+
+        if (exists) {
+            throw new IllegalArgumentException("A user with this ID or Email already exists in the system.");
+        }
+
         try {
-            String metadataJson = (metadata != null && !metadata.isEmpty()) ? objectMapper.writeValueAsString(metadata) : "{}";
+            String
+                    metadataJson =
+                    (metadata != null && !metadata.isEmpty()) ? objectMapper.writeValueAsString(metadata) : "{}";
 
             dsl.insertInto(table(name(schema, "tbl_users")))
                     .set(field("user_id"), userId)
                     .set(field("email"), email)
                     .set(field("first_name"), firstName)
                     .set(field("last_name"), lastName)
-                    // Safely cast the JSON string to PostgreSQL JSONB
-                    .set(field("metadata"), cast(val(metadataJson), SQLDataType.JSONB))
+                    .set(field("metadata"), DSL.cast(DSL.val(metadataJson), SQLDataType.JSONB))
                     .set(field("created_by"), adminUserId)
                     .execute();
 

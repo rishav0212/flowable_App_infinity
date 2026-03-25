@@ -41,6 +41,7 @@ public class UserManagementController {
         return ResponseEntity.ok(Map.of("message", "User created successfully"));
     }
 
+
     @GetMapping("/roles/{roleId}/permissions")
     public ResponseEntity<?> getRolePermissions(@PathVariable String roleId) {
         return ResponseEntity.ok(casbinService.getPoliciesForRole(roleId,
