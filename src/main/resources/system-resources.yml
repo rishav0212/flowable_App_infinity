@@ -1,0 +1,6 @@
+system:
+  resources:
+    # --- DASHBOARD ---
+    - key: "page:instance_manager"
+      type: "page"
+      displayName: "Running Instances Viewer"

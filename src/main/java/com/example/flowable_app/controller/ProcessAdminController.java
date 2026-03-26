@@ -1,15 +1,19 @@
 package com.example.flowable_app.controller;
 
+import com.example.flowable_app.config.RequiresPermission;
 import com.example.flowable_app.service.UserContextService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.flowable.engine.RepositoryService;
+import org.flowable.engine.RuntimeService;
 import org.flowable.engine.repository.Deployment;
+import org.flowable.engine.runtime.ProcessInstance;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -23,6 +27,7 @@ public class ProcessAdminController {
 
     private final RepositoryService repositoryService;
     private final UserContextService userContextService;
+    private final RuntimeService runtimeService; // 🟢 Inject this
 
     @PostMapping("/deploy")
     public ResponseEntity<?> deployProcess(
@@ -66,4 +71,58 @@ public class ProcessAdminController {
             ));
         }
     }
+
+
+    /**
+     * 🟢 NEW: Securely fetch all active process instances for the current tenant.
+     * Replaces the raw /process-api/runtime/process-instances call.
+     */
+    @GetMapping("/instances")
+    @RequiresPermission(resource = "page:instance_manager", action = "view")
+    public ResponseEntity<?> getInstances() {
+        try {
+            String tenantId = userContextService.getCurrentTenantId();
+
+            // 1. Secure Native Query
+            List<ProcessInstance> instances = runtimeService.createProcessInstanceQuery()
+                    .processInstanceTenantId(tenantId)
+                    .orderByStartTime().desc()
+                    .list();
+
+            // 2. 🟢 Clean, one-line mapping using Java Streams and our Record
+            List<ProcessInstanceDto> safeData = instances.stream()
+                    .map(ProcessInstanceDto::from)
+                    .toList();
+
+            // 3. Return the safe data
+            return ResponseEntity.ok(Map.of(
+                    "data", safeData,
+                    "total", safeData.size()
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ Failed to fetch process instances: {}", e.getMessage());
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+    public record ProcessInstanceDto(
+            String id,
+            String processDefinitionId,
+            String processDefinitionKey,
+            String processDefinitionName,
+            String businessKey,
+            java.util.Date startTime,
+            boolean suspended,
+            String tenantId
+    ) {
+        // A quick helper method to convert Flowable's object into our clean object
+        public static ProcessInstanceDto from(ProcessInstance pi) {
+            return new ProcessInstanceDto(
+                    pi.getId(), pi.getProcessDefinitionId(), pi.getProcessDefinitionKey(),
+                    pi.getProcessDefinitionName(), pi.getBusinessKey(), pi.getStartTime(),
+                    pi.isSuspended(), pi.getTenantId()
+            );
+        }
+    }
 }
+

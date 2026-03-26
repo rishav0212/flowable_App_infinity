@@ -1,0 +1,66 @@
+package com.example.flowable_app.service;
+
+import com.example.flowable_app.entity.Tenant;
+import com.example.flowable_app.repository.TenantRepository;
+import com.example.flowable_app.config.SystemCasbinResourceConfig;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.jooq.DSLContext;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import static org.jooq.impl.DSL.*;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class SystemResourceSyncService {
+
+    private final DSLContext dsl;
+    private final SystemCasbinResourceConfig resourceConfig;
+
+    // 🟢 Inject your JPA Repository
+    private final TenantRepository tenantRepository;
+
+    @Transactional
+    public void syncSystemResourcesAcrossAllTenants() {
+        log.info("🔄 Starting System Resource Sync from Configuration...");
+
+        if (resourceConfig.getResources() == null || resourceConfig.getResources().isEmpty()) {
+            log.warn("⚠️ No system resources found in configuration. Skipping sync.");
+            return;
+        }
+
+        // 🟢 1. Use the Repository to fetch all tenants cleanly!
+        List<Tenant> allTenants = tenantRepository.findAll();
+
+        // 2. Loop through the entities and get their schema names
+        for (Tenant tenant : allTenants) {
+            String schema = tenant.getSchemaName(); // Use your exact getter name here!
+
+            if (schema != null && !schema.trim().isEmpty()) {
+                syncResourcesToSchema(schema);
+            }
+        }
+
+        log.info("✅ Successfully synced {} system resources across {} tenants.",
+                resourceConfig.getResources().size(), allTenants.size());
+    }
+
+    public void syncResourcesToSchema(String schema) {
+        for (SystemCasbinResourceConfig.ResourceDef res : resourceConfig.getResources()) {
+            dsl.insertInto(table(name(schema, "tbl_resources")))
+                    .set(field("resource_key"), res.getKey())
+                    .set(field("display_name"), res.getDisplayName())
+                    .set(field("resource_type"), res.getType())
+                    .set(field("is_system"), true)
+                    .set(field("created_by"), "SYSTEM")
+                    .onConflict(field("resource_key"))
+                    .doUpdate()
+                    .set(field("display_name"), res.getDisplayName())
+                    .set(field("is_system"), true)
+                    .execute();
+        }
+    }
+}

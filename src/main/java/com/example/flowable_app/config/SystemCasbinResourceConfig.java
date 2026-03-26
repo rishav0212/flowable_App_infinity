@@ -1,0 +1,30 @@
+package com.example.flowable_app.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+import java.util.List;
+
+@Configuration
+@ConfigurationProperties(prefix = "system")
+public class SystemCasbinResourceConfig {
+
+    private List<ResourceDef> resources;
+
+    // Getters and Setters required for Spring binding
+    public List<ResourceDef> getResources() { return resources; }
+    public void setResources(List<ResourceDef> resources) { this.resources = resources; }
+
+    public static class ResourceDef {
+        private String key;
+        private String type;
+        private String displayName;
+
+        // Getters and Setters
+        public String getKey() { return key; }
+        public void setKey(String key) { this.key = key; }
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+        public String getDisplayName() { return displayName; }
+        public void setDisplayName(String displayName) { this.displayName = displayName; }
+    }
+}
