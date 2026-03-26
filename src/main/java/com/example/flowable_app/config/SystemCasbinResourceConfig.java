@@ -10,7 +10,6 @@ public class SystemCasbinResourceConfig {
 
     private List<ResourceDef> resources;
 
-    // Getters and Setters required for Spring binding
     public List<ResourceDef> getResources() { return resources; }
     public void setResources(List<ResourceDef> resources) { this.resources = resources; }
 
@@ -18,13 +17,19 @@ public class SystemCasbinResourceConfig {
         private String key;
         private String type;
         private String displayName;
+        private String description; // 🟢 ADD THIS
 
         // Getters and Setters
         public String getKey() { return key; }
         public void setKey(String key) { this.key = key; }
+
         public String getType() { return type; }
         public void setType(String type) { this.type = type; }
+
         public String getDisplayName() { return displayName; }
         public void setDisplayName(String displayName) { this.displayName = displayName; }
+
+        public String getDescription() { return description; }               // 🟢 ADD THIS
+        public void setDescription(String description) { this.description = description; } // 🟢 ADD THIS
     }
 }

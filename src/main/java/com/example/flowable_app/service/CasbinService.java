@@ -58,4 +58,19 @@ public class CasbinService {
         // getFilteredPolicy(0, ...) searches starting at index 0 (v0/Subject) for roleId, and index 1 for tenantId
         return casbinConfig.getEnforcer(schemaName).getFilteredPolicy(0, roleId, tenantId);
     }
-}
+
+    /**
+     * Fetches all policies associated with a specific resource for a given tenant.
+     * Casbin policy structure: p, roleId, tenantId, resourceKey, action
+     */
+    /**
+     * Fetches all policies associated with a specific resource for a given tenant.
+     * Casbin policy structure: p, roleId, tenantId, resourceKey, action
+     */
+    public List<List<String>> getPoliciesForResource(String tenantId, String schemaName, String resourceKey) {
+        // 🟢 Fetch the correct enforcer for this tenant's schema
+        Enforcer enforcer = casbinConfig.getEnforcer(schemaName);
+
+        // getFilteredPolicy(1, tenantId, resourceKey) filters on index 1 (tenant) and index 2 (resource)
+        return enforcer.getFilteredPolicy(1, tenantId, resourceKey);
+    }}

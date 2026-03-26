@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.jooq.DSLContext;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -69,5 +70,16 @@ public class PermissionController {
                 "tenantId", tenantId,
                 "permissions", permissions
         ));
+    }
+
+
+    @GetMapping("/resource/{resourceKey}")
+    public ResponseEntity<?> getResourcePermissions(@PathVariable String resourceKey) {
+        String tenantId = userContextService.getCurrentTenantId();
+        String schema = userContextService.getCurrentTenantSchema(); // 🟢 Get the schema
+
+        // 🟢 Pass the schema to the service
+        List<List<String>> policies = casbinService.getPoliciesForResource(tenantId, schema, resourceKey);
+        return ResponseEntity.ok(policies);
     }
 }

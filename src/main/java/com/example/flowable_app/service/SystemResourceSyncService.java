@@ -48,17 +48,23 @@ public class SystemResourceSyncService {
                 resourceConfig.getResources().size(), allTenants.size());
     }
 
+
     public void syncResourcesToSchema(String schema) {
         for (SystemCasbinResourceConfig.ResourceDef res : resourceConfig.getResources()) {
             dsl.insertInto(table(name(schema, "tbl_resources")))
                     .set(field("resource_key"), res.getKey())
                     .set(field("display_name"), res.getDisplayName())
                     .set(field("resource_type"), res.getType())
+                    .set(field("description"), res.getDescription()) // 🟢 Insert Description
                     .set(field("is_system"), true)
                     .set(field("created_by"), "SYSTEM")
+
+                    // 🔄 THE UPSERT LOGIC: If the key exists, update these fields!
                     .onConflict(field("resource_key"))
                     .doUpdate()
                     .set(field("display_name"), res.getDisplayName())
+                    .set(field("resource_type"), res.getType())      // 🟢 Update type if changed
+                    .set(field("description"), res.getDescription()) // 🟢 Update description if changed
                     .set(field("is_system"), true)
                     .execute();
         }

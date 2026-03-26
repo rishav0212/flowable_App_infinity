@@ -105,6 +105,49 @@ public class ProcessAdminController {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
+
+
+    /**
+     * Securely terminates a running process instance.
+     * Enforces Casbin permissions and strict tenant isolation.
+     */
+    @DeleteMapping("/instances/{id}")
+    @RequiresPermission(resource = "action:delete_instance", action = "execute")
+    public ResponseEntity<?> terminateInstance(
+            @PathVariable String id,
+            @RequestParam(required = false, defaultValue = "Terminated by Admin via UI") String reason) {
+
+        try {
+            String tenantId = userContextService.getCurrentTenantId();
+
+            // 1. Security Check: Verify the instance exists AND belongs strictly to the current tenant
+            long count = runtimeService.createProcessInstanceQuery()
+                    .processInstanceId(id)
+                    .processInstanceTenantId(tenantId)
+                    .count();
+
+            if (count == 0) {
+                // Return a generic 404 so attackers cannot probe for valid instance IDs across tenants
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", "Process instance not found or access denied."));
+            }
+
+            // 2. Terminate the instance in the Flowable engine
+            // The reason string is saved in the historic tables for auditing purposes
+            runtimeService.deleteProcessInstance(id, reason);
+
+            log.info("✅ Process instance {} terminated securely by tenant {}", id, tenantId);
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Process instance terminated successfully.",
+                    "id", id
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ Failed to terminate process instance {}: {}", id, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
     public record ProcessInstanceDto(
             String id,
             String processDefinitionId,
