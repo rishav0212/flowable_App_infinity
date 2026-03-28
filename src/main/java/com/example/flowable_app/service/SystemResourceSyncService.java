@@ -48,7 +48,6 @@ public class SystemResourceSyncService {
                 resourceConfig.getResources().size(), allTenants.size());
     }
 
-
     public void syncResourcesToSchema(String schema) {
         for (SystemCasbinResourceConfig.ResourceDef res : resourceConfig.getResources()) {
             dsl.insertInto(table(name(schema, "tbl_resources")))
@@ -67,6 +66,27 @@ public class SystemResourceSyncService {
                     .set(field("description"), res.getDescription()) // 🟢 Update description if changed
                     .set(field("is_system"), true)
                     .execute();
+
+            /*
+             * Synchronize the nested actions associated with the resource into the tbl_resource_actions table.
+             * By doing this, any newly defined actions in the YAML file automatically become available
+             * dynamically across all tenant schemas for permission assignment without writing new code.
+             */
+            if (res.getActions() != null && !res.getActions().isEmpty()) {
+                for (SystemCasbinResourceConfig.ActionDef action : res.getActions()) {
+                    dsl.insertInto(table(name(schema, "tbl_resource_actions")))
+                            .set(field("resource_key"), res.getKey())
+                            .set(field("action_name"), action.getName())
+                            .set(field("description"), action.getDescription())
+                            .set(field("created_by"), "SYSTEM")
+
+                            // Upsert logic for actions: updates the description if the action already exists
+                            .onConflict(field("resource_key"), field("action_name"))
+                            .doUpdate()
+                            .set(field("description"), action.getDescription())
+                            .execute();
+                }
+            }
         }
     }
 }

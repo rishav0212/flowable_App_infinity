@@ -1,5 +1,6 @@
 package com.example.flowable_app.controller;
 
+import com.example.flowable_app.config.SystemCasbinResourceConfig;
 import com.example.flowable_app.service.CasbinService;
 import com.example.flowable_app.service.UserContextService;
 import com.example.flowable_app.service.UserManagementService;
@@ -7,6 +8,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -41,17 +44,11 @@ public class UserManagementController {
         return ResponseEntity.ok(Map.of("message", "User created successfully"));
     }
 
-
-    @GetMapping("/roles/{roleId}/permissions")
-    public ResponseEntity<?> getRolePermissions(@PathVariable String roleId) {
-        return ResponseEntity.ok(casbinService.getPoliciesForRole(roleId,
-                userContextService.getCurrentTenantId(),
-                userContextService.getCurrentTenantSchema()));
-    }
-
     @PutMapping("/users/{userId}/deactivate")
     public ResponseEntity<?> deactivateUser(@PathVariable String userId) {
-        userMgmtService.deactivateUser(userId, userContextService.getCurrentTenantSchema(), userContextService.getCurrentUserId());
+        userMgmtService.deactivateUser(userId,
+                userContextService.getCurrentTenantSchema(),
+                userContextService.getCurrentUserId());
         return ResponseEntity.ok(Map.of("message", "User deactivated"));
     }
 
@@ -80,15 +77,61 @@ public class UserManagementController {
         String schema = userContextService.getCurrentTenantSchema();
         String tenantId = userContextService.getCurrentTenantId();
 
-        // 1. Save to relational DB for UI tracking
         userMgmtService.assignRoleToUser(userId, roleId, schema, userContextService.getCurrentUserId());
-        // 2. Tell Casbin about the new mapping
         casbinService.assignRoleToUser(userId, roleId, tenantId, schema);
 
         return ResponseEntity.ok(Map.of("message", "Role assigned to user"));
     }
 
+    @GetMapping("/users/{userId}/roles")
+    public ResponseEntity<?> getUserRoles(@PathVariable String userId) {
+        return ResponseEntity.ok(userMgmtService.getUserRoles(userId, userContextService.getCurrentTenantSchema()));
+    }
+
+    @DeleteMapping("/users/{userId}/roles/{roleId}")
+    public ResponseEntity<?> removeRole(@PathVariable String userId, @PathVariable String roleId) {
+        String schema = userContextService.getCurrentTenantSchema();
+        String tenantId = userContextService.getCurrentTenantId();
+
+        userMgmtService.removeRoleFromUser(userId, roleId, schema);
+        casbinService.removeRoleFromUser(userId, roleId, tenantId, schema);
+
+        return ResponseEntity.ok(Map.of("message", "Role removed from user"));
+    }
+
+    // === ROLE INHERITANCE (LEAN CASBIN) ===
+
+    @GetMapping("/roles/{roleId}/inherits")
+    public ResponseEntity<?> getInheritedRoles(@PathVariable String roleId) {
+        return ResponseEntity.ok(casbinService.getInheritedRoles(roleId,
+                userContextService.getCurrentTenantId(),
+                userContextService.getCurrentTenantSchema()));
+    }
+
+    @PostMapping("/roles/{roleId}/inherits/{inheritsRoleId}")
+    public ResponseEntity<?> addRoleInheritance(@PathVariable String roleId, @PathVariable String inheritsRoleId) {
+        casbinService.addRoleInheritance(roleId, inheritsRoleId,
+                userContextService.getCurrentTenantId(),
+                userContextService.getCurrentTenantSchema());
+        return ResponseEntity.ok(Map.of("message", "Role inheritance added successfully"));
+    }
+
+    @DeleteMapping("/roles/{roleId}/inherits/{inheritsRoleId}")
+    public ResponseEntity<?> removeRoleInheritance(@PathVariable String roleId, @PathVariable String inheritsRoleId) {
+        casbinService.removeRoleInheritance(roleId, inheritsRoleId,
+                userContextService.getCurrentTenantId(),
+                userContextService.getCurrentTenantSchema());
+        return ResponseEntity.ok(Map.of("message", "Role inheritance removed successfully"));
+    }
+
     // === PERMISSION MATRIX ENGINE ===
+
+    @GetMapping("/roles/{roleId}/permissions")
+    public ResponseEntity<?> getRolePermissions(@PathVariable String roleId) {
+        return ResponseEntity.ok(casbinService.getPoliciesForRole(roleId,
+                userContextService.getCurrentTenantId(),
+                userContextService.getCurrentTenantSchema()));
+    }
 
     @GetMapping("/resources")
     public ResponseEntity<?> listResources() {
@@ -96,17 +139,44 @@ public class UserManagementController {
     }
 
     @PostMapping("/resources")
+    @SuppressWarnings("unchecked")
     public ResponseEntity<?> createResource(@RequestBody Map<String, Object> payload) {
         String resourceKey = (String) payload.get("resourceKey");
         String resourceType = (String) payload.get("resourceType");
         String displayName = (String) payload.get("displayName");
         String description = (String) payload.get("description");
 
+        List<Map<String, String>> actionsPayload = (List<Map<String, String>>) payload.get("actions");
+        List<SystemCasbinResourceConfig.ActionDef> actions = new ArrayList<>();
+
+        if (actionsPayload != null) {
+            for (Map<String, String> actMap : actionsPayload) {
+                SystemCasbinResourceConfig.ActionDef actionDef = new SystemCasbinResourceConfig.ActionDef();
+                actionDef.setName(actMap.get("name"));
+                actionDef.setDescription(actMap.get("description"));
+                actions.add(actionDef);
+            }
+        }
+
         userMgmtService.registerResource(resourceKey, resourceType, displayName, description,
+                userContextService.getCurrentTenantSchema(),
+                userContextService.getCurrentUserId(),
+                actions);
+
+        return ResponseEntity.ok(Map.of("message", "Resource registered successfully"));
+    }
+
+    @PostMapping("/resources/{resourceKey}/actions")
+    public ResponseEntity<?> addCustomActionToResource(
+            @PathVariable String resourceKey, @RequestBody Map<String, String> payload) {
+        String actionName = payload.get("actionName");
+        String description = payload.get("description");
+
+        userMgmtService.addCustomActionToResource(resourceKey, actionName, description,
                 userContextService.getCurrentTenantSchema(),
                 userContextService.getCurrentUserId());
 
-        return ResponseEntity.ok(Map.of("message", "Resource registered"));
+        return ResponseEntity.ok(Map.of("message", "Action added successfully"));
     }
 
     @PostMapping("/permissions/grant")
@@ -131,23 +201,5 @@ public class UserManagementController {
                 (String) payload.get("action")
         );
         return ResponseEntity.ok(Map.of("message", "Permission revoked"));
-    }
-
-    @GetMapping("/users/{userId}/roles")
-    public ResponseEntity<?> getUserRoles(@PathVariable String userId) {
-        return ResponseEntity.ok(userMgmtService.getUserRoles(userId, userContextService.getCurrentTenantSchema()));
-    }
-
-    @DeleteMapping("/users/{userId}/roles/{roleId}")
-    public ResponseEntity<?> removeRole(@PathVariable String userId, @PathVariable String roleId) {
-        String schema = userContextService.getCurrentTenantSchema();
-        String tenantId = userContextService.getCurrentTenantId();
-
-        // 1. Remove from relational DB
-        userMgmtService.removeRoleFromUser(userId, roleId, schema);
-        // 2. Tell Casbin to remove the mapping
-        casbinService.removeRoleFromUser(userId, roleId, tenantId, schema);
-
-        return ResponseEntity.ok(Map.of("message", "Role removed from user"));
     }
 }

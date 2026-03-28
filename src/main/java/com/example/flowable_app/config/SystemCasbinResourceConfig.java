@@ -18,6 +18,7 @@ public class SystemCasbinResourceConfig {
         private String type;
         private String displayName;
         private String description; // 🟢 ADD THIS
+        private List<ActionDef> actions;
 
         // Getters and Setters
         public String getKey() { return key; }
@@ -31,5 +32,19 @@ public class SystemCasbinResourceConfig {
 
         public String getDescription() { return description; }               // 🟢 ADD THIS
         public void setDescription(String description) { this.description = description; } // 🟢 ADD THIS
+
+        public List<ActionDef> getActions() { return actions; }
+        public void setActions(List<ActionDef> actions) { this.actions = actions; }
+    }
+
+    public static class ActionDef {
+        private String name;
+        private String description;
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
     }
 }

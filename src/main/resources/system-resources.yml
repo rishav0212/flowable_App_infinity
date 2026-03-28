@@ -6,9 +6,8 @@ system:
       type: "page"
       displayName: "Running Instances Viewer"
       description: "Allows the user to view the list of all active and historic process instances."
-
-    - key: "action:delete_instance"
-      type: "action"
-      displayName: "Terminate/Delete Instances"
-      description: "DANGEROUS: Grants the ability to permanently terminate or delete running process instances."
-
+      actions:
+        - name: "view"
+          description: "Basic capability to view the instance list."
+        - name: "delete_instance"
+          description: "DANGEROUS: Grants the ability to permanently terminate or delete running process instances."

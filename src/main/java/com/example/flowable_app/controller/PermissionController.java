@@ -5,6 +5,8 @@ import com.example.flowable_app.service.UserContextService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jooq.DSLContext;
+import org.jooq.Record2;
+import org.jooq.Result;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,35 +35,26 @@ public class PermissionController {
         String tenantId = userContextService.getCurrentTenantId();
         String schema = userContextService.getCurrentTenantSchema();
 
-        // 1. Fetch ALL resource keys registered for this tenant
-        List<String> allKeys = dsl.select(field("resource_key", String.class))
-                .from(table(name(schema, "tbl_resources")))
-                .fetchInto(String.class);
+        // Dynamically fetch all resources AND their supported actions from the relational database.
+        // This completely eliminates hardcoded checks for "view", "execute", "create", etc.,
+        // allowing the system to scale to infinite custom action types seamlessly.
+        Result<Record2<String, String>> resourceActions = dsl.select(
+                        field("resource_key", String.class),
+                        field("action_name", String.class))
+                .from(table(name(schema, "tbl_resource_actions")))
+                .fetch();
 
         Map<String, Boolean> permissions = new LinkedHashMap<>();
 
-        // 2. Loop through all keys and check the exact actions the frontend expects
-        for (String key : allKeys) {
+        // Loop through the precise action map defined in the database
+        for (Record2<String, String> record : resourceActions) {
+            String key = record.value1();
+            String action = record.value2();
 
-            // Check 'view' (Standard for pages and components)
-            boolean canView = casbinService.canDo(userId, tenantId, schema, key, "view");
-            if (canView) {
-                permissions.put(key + ":view", true); // ✅ Matches frontend format exactly
-            }
-
-            // Check 'execute' (Standard for actions and buttons)
-            boolean canExecute = casbinService.canDo(userId, tenantId, schema, key, "execute");
-            if (canExecute) {
-                permissions.put(key + ":execute", true); // ✅ Matches frontend format exactly
-            }
-
-            // Check extra CRUD actions if it is a table
-            if (key.startsWith("table:")) {
-                if (casbinService.canDo(userId, tenantId, schema, key, "create"))
-                    permissions.put(key + ":create", true);
-                if (casbinService.canDo(userId, tenantId, schema, key, "edit")) permissions.put(key + ":edit", true);
-                if (casbinService.canDo(userId, tenantId, schema, key, "delete"))
-                    permissions.put(key + ":delete", true);
+            // Check Casbin only for the actions that are explicitly registered for this resource
+            boolean canDoAction = casbinService.canDo(userId, tenantId, schema, key, action);
+            if (canDoAction) {
+                permissions.put(key + ":" + action, true); // ✅ Matches frontend format exactly
             }
         }
 
@@ -71,7 +64,6 @@ public class PermissionController {
                 "permissions", permissions
         ));
     }
-
 
     @GetMapping("/resource/{resourceKey}")
     public ResponseEntity<?> getResourcePermissions(@PathVariable String resourceKey) {

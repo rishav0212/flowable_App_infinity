@@ -1,5 +1,6 @@
 package com.example.flowable_app.service;
 
+import com.example.flowable_app.config.SystemCasbinResourceConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -98,7 +99,20 @@ public class UserManagementService {
                 .execute();
     }
 
+    /**
+     * Overloaded method to support legacy calls without actions
+     */
+    @Transactional
     public void registerResource(String resourceKey, String resourceType, String displayName, String description, String schema, String adminUserId) {
+        registerResource(resourceKey, resourceType, displayName, description, schema, adminUserId, null);
+    }
+
+    /**
+     * Registers a resource and populates its supported actions in the relational table.
+     * This establishes the blueprint of what actions are possible for this specific resource.
+     */
+    @Transactional
+    public void registerResource(String resourceKey, String resourceType, String displayName, String description, String schema, String adminUserId, List<SystemCasbinResourceConfig.ActionDef> actions) {
         dsl.insertInto(table(name(schema, "tbl_resources")))
                 .set(field("resource_key"), resourceKey)
                 .set(field("resource_type"), resourceType)
@@ -106,7 +120,36 @@ public class UserManagementService {
                 .set(field("description"), description)
                 .set(field("created_by"), adminUserId)
                 .onConflict(field("resource_key"))
-                .doNothing() // Ignore if the resource is already registered
+                // 🟢 CHANGED: Now acts as an Update if the resource already exists!
+                .doUpdate()
+                .set(field("display_name"), displayName)
+                .set(field("description"), description)
+                .execute();
+
+        if (actions != null && !actions.isEmpty()) {
+            for (SystemCasbinResourceConfig.ActionDef action : actions) {
+                dsl.insertInto(table(name(schema, "tbl_resource_actions")))
+                        .set(field("resource_key"), resourceKey)
+                        .set(field("action_name"), action.getName())
+                        .set(field("description"), action.getDescription())
+                        .set(field("created_by"), adminUserId)
+                        .onConflict(field("resource_key"), field("action_name"))
+                        .doNothing() // Actions remain insert-only (no updating action names)
+                        .execute();
+            }
+        }
+    }
+    /**
+     * Allows tenants or admins to define completely custom actions for an existing resource dynamically.
+     */
+    public void addCustomActionToResource(String resourceKey, String actionName, String description, String schema, String adminUserId) {
+        dsl.insertInto(table(name(schema, "tbl_resource_actions")))
+                .set(field("resource_key"), resourceKey)
+                .set(field("action_name"), actionName)
+                .set(field("description"), description)
+                .set(field("created_by"), adminUserId)
+                .onConflict(field("resource_key"), field("action_name"))
+                .doNothing()
                 .execute();
     }
 
@@ -117,7 +160,31 @@ public class UserManagementService {
     }
 
     public List<Map<String, Object>> getAllResources(String schema) {
-        return dsl.selectFrom(table(name(schema, "tbl_resources")))
+        // 1. Fetch all resources
+        List<Map<String, Object>> resources = dsl.selectFrom(table(name(schema, "tbl_resources")))
+                .fetch()
+                .intoMaps();
+
+        // 2. Fetch all actions
+        List<Map<String, Object>> actions = dsl.selectFrom(table(name(schema, "tbl_resource_actions")))
+                .fetch()
+                .intoMaps();
+
+        // 3. Attach actions to their respective resources
+        for (Map<String, Object> res : resources) {
+            String rKey = (String) res.get("resource_key");
+            List<Map<String, Object>> resActions = actions.stream()
+                    .filter(a -> rKey.equals(a.get("resource_key")))
+                    .toList();
+            res.put("actions", resActions);
+        }
+
+        return resources;
+    }
+
+    public List<Map<String, Object>> getActionsForResource(String resourceKey, String schema) {
+        return dsl.selectFrom(table(name(schema, "tbl_resource_actions")))
+                .where(field("resource_key").eq(resourceKey))
                 .fetch()
                 .intoMaps();
     }

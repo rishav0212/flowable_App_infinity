@@ -73,4 +73,24 @@ public class CasbinService {
 
         // getFilteredPolicy(1, tenantId, resourceKey) filters on index 1 (tenant) and index 2 (resource)
         return enforcer.getFilteredPolicy(1, tenantId, resourceKey);
-    }}
+    }
+
+// =====================================================================================
+    // 6. ROLE INHERITANCE (LEAN CASBIN APPROACH)
+    // =====================================================================================
+
+    // In Casbin, "adding a role for a user" is structurally identical to "adding a role for a role".
+    // This creates a `g, roleId, inheritsRoleId, tenantId` rule in the casbin_rule table.
+
+    public void addRoleInheritance(String roleId, String inheritsRoleId, String tenantId, String schemaName) {
+        casbinConfig.getEnforcer(schemaName).addRoleForUserInDomain(roleId, inheritsRoleId, tenantId);
+    }
+
+    public void removeRoleInheritance(String roleId, String inheritsRoleId, String tenantId, String schemaName) {
+        casbinConfig.getEnforcer(schemaName).deleteRoleForUserInDomain(roleId, inheritsRoleId, tenantId);
+    }
+
+    public List<String> getInheritedRoles(String roleId, String tenantId, String schemaName) {
+        return casbinConfig.getEnforcer(schemaName).getRolesForUserInDomain(roleId, tenantId);
+    }
+}
