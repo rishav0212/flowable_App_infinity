@@ -200,6 +200,7 @@ public class UserManagementController {
                 (String) payload.get("resourceKey"),
                 (String) payload.get("action")
         );
+
         return ResponseEntity.ok(Map.of("message", "Permission revoked"));
     }
 }
