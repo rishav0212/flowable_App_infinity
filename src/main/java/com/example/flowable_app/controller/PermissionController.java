@@ -103,8 +103,8 @@ public class PermissionController {
             // 2. Resolve Tenant & Schema
             // WHY: Now that we have the actual tenant_id (252ad06d...), we fetch the
             // full tenant record to get the correct database schema (e.g., 'saar_biotech').
-            Tenant tenant = tenantRepository.findById(mapping.getId().toString())
-                    .orElseThrow(() -> new RuntimeException("Tenant record missing for ID: " + mapping.getId()));
+            Tenant tenant = tenantRepository.findById(mapping.getTenant().toString())
+                    .orElseThrow(() -> new RuntimeException("Tenant record missing for ID: " + mapping.getTenant()));
 
             String schema = tenant.getSchemaName();
 
@@ -132,7 +132,7 @@ public class PermissionController {
 
             // 5. Evaluate Casbin rules
             // We use the internal tenantId (252ad06d...) for the Casbin domain check
-            String internalTenantId = mapping.getId().toString();
+            String internalTenantId = mapping.getTenant().toString();
             for (Record2<String, String> record : resourceActions) {
                 String key = record.value1();
                 String action = record.value2();
