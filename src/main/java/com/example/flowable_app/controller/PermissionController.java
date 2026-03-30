@@ -91,24 +91,27 @@ public class PermissionController {
     public ResponseEntity<?> getToolJetPermissions(
             @RequestParam(required = false) String userId,
             @RequestParam(required = false) String email,
-            @RequestParam String organisationId) { // This is the ad2d75f8... ID from ToolJet
+            @RequestParam String organisationId) { // This is the workspace_uuid from ToolJet
 
         try {
-            // 1. Bridge Lookup: Find the Tenant ID mapped to this ToolJet Workspace UUID
-            // WHY: ToolJet identifies itself with its own UUID (organisationId).
-            // We use our mapping table to translate this into our internal tenant_id.
+            // 1. Bridge Lookup: Find the Tenant mapping via ToolJet Workspace UUID
+            // WHY: ToolJet identifies itself with its own UUID. We use our mapping table
+            // (tbl_tooljet_workspaces) to resolve which internal tenant this belongs to.
             ToolJetWorkspace mapping = toolJetWorkspaceRepository.findByWorkspaceUuid(organisationId)
                     .orElseThrow(() -> new RuntimeException("No tenant mapping found for Workspace UUID: " + organisationId));
 
             // 2. Resolve Tenant & Schema
-            // WHY: Now that we have the actual tenant_id (252ad06d...), we fetch the
-            // full tenant record to get the correct database schema (e.g., 'saar_biotech').
-            Tenant tenant = tenantRepository.findById(mapping.getTenant().toString())
-                    .orElseThrow(() -> new RuntimeException("Tenant record missing for ID: " + mapping.getTenant()));
+            // WHY: mapping.getTenant() already provides the full Tenant object thanks to the
+            // JPA @OneToOne relationship. We extract the ID and Schema name directly from it.
+            Tenant tenant = mapping.getTenant();
+            if (tenant == null) {
+                throw new RuntimeException("Tenant relationship is null for mapping ID: " + mapping.getId());
+            }
 
             String schema = tenant.getSchemaName();
+            String internalTenantId = tenant.getId();
 
-            // 3. 🟢 SMART LOOKUP: Find userId via email if missing
+            // 3. 🟢 SMART LOOKUP: Find internal userId via email if missing (Common in Developer Mode)
             if ((userId == null || userId.trim().isEmpty()) && email != null && !email.trim().isEmpty()) {
                 userId = allowedUserService.getUserIdByEmail(email, schema);
                 if (userId == null) {
@@ -122,6 +125,8 @@ public class PermissionController {
             }
 
             // 4. Fetch all registered resources & actions from the Resolved Schema
+            // WHY: This ensures we check permissions for every single action defined
+            // specifically for this tenant's environment.
             Result<Record2<String, String>> resourceActions = dsl.select(
                             field("resource_key", String.class),
                             field("action_name", String.class))
@@ -131,8 +136,7 @@ public class PermissionController {
             Map<String, Boolean> permissions = new LinkedHashMap<>();
 
             // 5. Evaluate Casbin rules
-            // We use the internal tenantId (252ad06d...) for the Casbin domain check
-            String internalTenantId = mapping.getTenant().toString();
+            // We use the internal tenant UUID for the Casbin domain check to ensure isolation.
             for (Record2<String, String> record : resourceActions) {
                 String key = record.value1();
                 String action = record.value2();
@@ -154,5 +158,4 @@ public class PermissionController {
             log.error("❌ Failed to fetch internal permissions", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
-    }
-}
+    }}
