@@ -9,6 +9,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 
 @Configuration
 @EnableWebSecurity
@@ -24,12 +25,13 @@ public class InternalApiSecurityConfig {
     @Order(1) // Runs early in the filter chain
     public SecurityFilterChain internalApiSecurityFilterChain(HttpSecurity http) throws Exception {
         http
-                // 🟢 ONLY apply this security config to the internal endpoints
-                .securityMatcher("/api/permissions/internal/**")
+                // 🟢 FIX: Explicitly use AntPathRequestMatcher
+                .securityMatcher(new AntPathRequestMatcher("/api/permissions/internal/**"))
 
                 .authorizeHttpRequests(auth -> auth
-                        // 🟢 Ensure the token specifically has the 'internal:read' scope we granted to ToolJet
-                        .requestMatchers("/api/permissions/internal/**").hasAuthority("SCOPE_internal:read")
+                        // 🟢 FIX: Explicitly use AntPathRequestMatcher here as well
+                        .requestMatchers(new AntPathRequestMatcher("/api/permissions/internal/**"))
+                        .hasAuthority("SCOPE_internal:read")
                         .anyRequest().authenticated()
                 )
 
