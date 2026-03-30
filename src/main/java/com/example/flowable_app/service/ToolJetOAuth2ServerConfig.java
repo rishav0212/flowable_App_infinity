@@ -71,19 +71,20 @@ public class ToolJetOAuth2ServerConfig {
     public RegisteredClientRepository registeredClientRepository() {
         RegisteredClient tooljetClient = RegisteredClient.withId(UUID.randomUUID().toString())
                 .clientId("tooljet-internal-client")
-                // {noop} tells Spring not to expect a BCrypt hash, allowing plain-text secret comparison for this M2M client
-                .clientSecret("{noop}tooljet-super-secret-key-123")
+                .clientSecret("{noop}tooljet-super-secret-key-123") // Must have {noop} here!
+                // 🟢 FIX 1: Allow BOTH Basic Auth and Body (POST) Auth. ToolJet often messes this up.
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_POST)
+                // 🟢 FIX 2: Ensure it accepts Client Credentials
                 .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
                 .scope("internal:read")
                 .tokenSettings(TokenSettings.builder()
-                        .accessTokenTimeToLive(Duration.ofMinutes(5)) // 🟢 Highly secure 5-minute rotating tokens
+                        .accessTokenTimeToLive(Duration.ofMinutes(5))
                         .build())
                 .build();
 
         return new InMemoryRegisteredClientRepository(tooljetClient);
     }
-
     /**
      * 3. RSA Key Generation for signing the JWTs.
      */
