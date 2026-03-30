@@ -10,4 +10,6 @@ import java.util.Optional;
 public interface ToolJetWorkspaceRepository extends JpaRepository<ToolJetWorkspace, Long> {
     // Finds the configuration for a specific tenant
     Optional<ToolJetWorkspace> findByTenantId(String tenantId);
+
+    Optional<ToolJetWorkspace> findByWorkspaceUuid(String workspaceUuid);
 }

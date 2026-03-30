@@ -32,4 +32,6 @@ public interface TooljetWorkspaceAppRepository extends JpaRepository<TooljetWork
           AND a.workspace.tenant.id = :tenantId
     """)
     boolean isAppAllowedForTenant(String tenantId, String appId);
+
+
 }

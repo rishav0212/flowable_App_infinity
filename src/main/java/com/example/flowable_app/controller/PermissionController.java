@@ -1,7 +1,9 @@
 package com.example.flowable_app.controller;
 
 import com.example.flowable_app.entity.Tenant;
+import com.example.flowable_app.entity.ToolJetWorkspace;
 import com.example.flowable_app.repository.TenantRepository;
+import com.example.flowable_app.repository.ToolJetWorkspaceRepository;
 import com.example.flowable_app.service.AllowedUserService;
 import com.example.flowable_app.service.CasbinService;
 import com.example.flowable_app.service.UserContextService;
@@ -83,26 +85,35 @@ public class PermissionController {
     // 🟢 NEW: INTERNAL TOOLJET BFF ENDPOINT
     // ==================================================================================
 
+    private final ToolJetWorkspaceRepository toolJetWorkspaceRepository; // Inject this new repo
+
     @GetMapping("/internal/tooljet-permissions")
     public ResponseEntity<?> getToolJetPermissions(
             @RequestParam(required = false) String userId,
             @RequestParam(required = false) String email,
-            @RequestParam String organisationId) { // Updated parameter to directly accept organisationId from the URL
+            @RequestParam String organisationId) { // This is the ad2d75f8... ID from ToolJet
 
         try {
-            // 1. Resolve Schema from Organisation ID
-            // We use the organisationId to fetch the tenant details because in this architecture,
-            // the organisation acts as the tenant, dictating which isolated database schema to query.
-            Tenant tenant = tenantRepository.findById(organisationId)
-                    .orElseThrow(() -> new RuntimeException("Tenant/Organisation not found"));
+            // 1. Bridge Lookup: Find the Tenant ID mapped to this ToolJet Workspace UUID
+            // WHY: ToolJet identifies itself with its own UUID (organisationId).
+            // We use our mapping table to translate this into our internal tenant_id.
+            ToolJetWorkspace mapping = toolJetWorkspaceRepository.findByWorkspaceUuid(organisationId)
+                    .orElseThrow(() -> new RuntimeException("No tenant mapping found for Workspace UUID: " + organisationId));
+
+            // 2. Resolve Tenant & Schema
+            // WHY: Now that we have the actual tenant_id (252ad06d...), we fetch the
+            // full tenant record to get the correct database schema (e.g., 'saar_biotech').
+            Tenant tenant = tenantRepository.findById(mapping.getId().toString())
+                    .orElseThrow(() -> new RuntimeException("Tenant record missing for ID: " + mapping.getId()));
+
             String schema = tenant.getSchemaName();
 
-            // 2. 🟢 SMART LOOKUP: If userId is missing (Developer Mode), find it via email
+            // 3. 🟢 SMART LOOKUP: Find userId via email if missing
             if ((userId == null || userId.trim().isEmpty()) && email != null && !email.trim().isEmpty()) {
                 userId = allowedUserService.getUserIdByEmail(email, schema);
                 if (userId == null) {
                     return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                            .body("User with email " + email + " not found in organisation " + organisationId);
+                            .body("User with email " + email + " not found in tenant schema " + schema);
                 }
             }
 
@@ -110,7 +121,7 @@ public class PermissionController {
                 return ResponseEntity.badRequest().body("Either userId or email must be provided");
             }
 
-            // 3. Fetch all registered resources & actions
+            // 4. Fetch all registered resources & actions from the Resolved Schema
             Result<Record2<String, String>> resourceActions = dsl.select(
                             field("resource_key", String.class),
                             field("action_name", String.class))
@@ -119,22 +130,23 @@ public class PermissionController {
 
             Map<String, Boolean> permissions = new LinkedHashMap<>();
 
-            // 4. Evaluate Casbin rules for this specific user
-            // We pass the organisationId into casbinService.canDo() as the domain/tenant parameter.
-            // This ensures the permission check is strictly scoped to the user's specific organisation environment.
+            // 5. Evaluate Casbin rules
+            // We use the internal tenantId (252ad06d...) for the Casbin domain check
+            String internalTenantId = mapping.getId().toString();
             for (Record2<String, String> record : resourceActions) {
                 String key = record.value1();
                 String action = record.value2();
-                if (casbinService.canDo(userId, organisationId, schema, key, action)) {
+                if (casbinService.canDo(userId, internalTenantId, schema, key, action)) {
                     permissions.put(key + ":" + action, true);
                 }
             }
 
-            log.info("✅ Internal Permissions fetched for User: {} in Organisation: {}", userId, organisationId);
+            log.info("✅ Permissions successfully mapped for ToolJet Workspace: {} (Tenant: {})", organisationId, internalTenantId);
 
             return ResponseEntity.ok(Map.of(
                     "userId", userId,
-                    "organisationId", organisationId, // Returning organisationId in the payload to maintain consistency with the request
+                    "organisationId", organisationId,
+                    "tenantId", internalTenantId,
                     "permissions", permissions
             ));
 
