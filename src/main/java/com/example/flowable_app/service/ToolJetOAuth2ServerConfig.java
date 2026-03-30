@@ -1,4 +1,4 @@
-package com.example.flowable_app.config;
+package com.example.flowable_app.service;
 
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
@@ -41,8 +41,24 @@ public class ToolJetOAuth2ServerConfig {
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
     public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
-        OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http);
-        http.getConfigurer(OAuth2AuthorizationServerConfigurer.class).oidc(Customizer.withDefaults());
+        OAuth2AuthorizationServerConfigurer authorizationServerConfigurer =
+                OAuth2AuthorizationServerConfigurer.authorizationServer();
+
+        http
+                // 🟢 CRITICAL FIX: Ensure this filter chain ONLY intercepts OAuth2 protocol endpoints.
+                // Without this, the HIGHEST_PRECEDENCE order would hijack all your normal API traffic.
+                .securityMatcher(authorizationServerConfigurer.getEndpointsMatcher())
+
+                // Apply the Authorization Server configuration safely to the HttpSecurity object
+                .with(authorizationServerConfigurer, (authorizationServer) ->
+                        authorizationServer.oidc(Customizer.withDefaults())
+                )
+
+                // Require authentication for these specific OAuth2 endpoints
+                .authorizeHttpRequests((authorize) ->
+                        authorize.anyRequest().authenticated()
+                );
+
         return http.build();
     }
 
