@@ -138,7 +138,7 @@ public class ToolJetBffController {
 
             // Result: /applications/<app-id>?userId= ?
             String cleanPathForBrowser = fullPath.substring(fullPath.indexOf("/applications/"))
-                    + "?userId=" + verifiedId;
+                    + "?userId=" + verifiedId +"&userEmail=" + userEmail;
 
             // Use the modified path for the script injection
             return injectUrlFixerScript(executeProxyWithRetry(targetPath, request, userEmail, body, tenantId),
