@@ -29,6 +29,9 @@ import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.time.Duration;
 import java.util.UUID;
+import org.springframework.security.crypto.factory.PasswordEncoderFactories;
+import org.springframework.security.crypto.password.PasswordEncoder;
+
 
 @Configuration
 public class ToolJetOAuth2ServerConfig {
@@ -61,7 +64,11 @@ public class ToolJetOAuth2ServerConfig {
 
         return http.build();
     }
-
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        // This enables the DelegatingPasswordEncoder which handles the {noop} prefix
+        return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+    }
     /**
      * 2. Client Registration
      * Registers ToolJet as a machine-to-machine client in memory.
