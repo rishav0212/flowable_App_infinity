@@ -192,4 +192,41 @@ public class GoogleDriveService {
         log.debug("✅ END: Metadata retrieved for file: [{}]", file.getName());
         return file;
     }
+
+    /**
+     * 🟢 NEW: Uploads a file using a raw byte array.
+     * This is specifically implemented for ToolJet, as ToolJet's File Picker
+     * easily exposes files as Base64 strings. We decode the Base64 in the controller
+     * and pass the raw bytes here.
+     */
+    public String uploadFile(byte[] fileBytes, String contentType, String customFileName, String targetFolderId) throws IOException {
+        if (targetFolderId == null || targetFolderId.trim().isEmpty()) {
+            throw new IllegalArgumentException("Target Folder ID is required for upload.");
+        }
+
+        log.debug("🚀 START: Uploading byte array file [{}] to Folder [{}]", customFileName, targetFolderId);
+
+        Drive service = getDriveService();
+
+        File fileMetadata = new File();
+        fileMetadata.setName(customFileName);
+        fileMetadata.setParents(Collections.singletonList(targetFolderId));
+
+        // Wrap the byte array in an InputStream for the Google API client
+        InputStreamContent mediaContent = new InputStreamContent(
+                contentType,
+                new java.io.ByteArrayInputStream(fileBytes)
+        );
+        // Explicitly setting the length optimizes the upload process and prevents chunking errors
+        mediaContent.setLength(fileBytes.length);
+
+        File file = service.files()
+                .create(fileMetadata, mediaContent)
+                .setFields("id")
+                .setSupportsAllDrives(true)
+                .execute();
+
+        log.info("✅ END: Upload Successful. New File ID: [{}]", file.getId());
+        return file.getId();
+    }
 }

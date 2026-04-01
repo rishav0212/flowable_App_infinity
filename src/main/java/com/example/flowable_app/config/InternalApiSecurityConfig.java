@@ -26,11 +26,11 @@ public class InternalApiSecurityConfig {
     public SecurityFilterChain internalApiSecurityFilterChain(HttpSecurity http) throws Exception {
         http
                 // 🟢 FIX: Explicitly use AntPathRequestMatcher
-                .securityMatcher(new AntPathRequestMatcher("/api/permissions/internal/**"))
+                .securityMatcher(new AntPathRequestMatcher("/api/internal/tooljet/**"))
 
                 .authorizeHttpRequests(auth -> auth
                         // 🟢 FIX: Explicitly use AntPathRequestMatcher here as well
-                        .requestMatchers(new AntPathRequestMatcher("/api/permissions/internal/**"))
+                        .requestMatchers(new AntPathRequestMatcher("/api/internal/tooljet/**"))
                         .hasAuthority("SCOPE_internal:read")
                         .anyRequest().authenticated()
                 )
