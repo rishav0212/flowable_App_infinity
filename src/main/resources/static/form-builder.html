@@ -403,8 +403,154 @@
 
         const container = document.getElementById('formio-builder');
 
-        builderInstance = await Formio.builder(container, initialSchema || {}, {
-          noDefaultSubmitButton: false
+        const builderOptions = {
+          noDefaultSubmitButton: false,
+          builder: {
+            customDatabaseGroup: {
+              title: 'My Database Resources',
+              default: true,
+              weight: -10,
+              components: {
+
+                // =========================================================================
+                // Renamed to "Database Lookup" for clarity
+                // Added a root-level custom property "customFilterMapping" to hold our mapping array
+                // =========================================================================
+                databaseLookup: {
+                  title: 'Database Lookup',
+                  key: 'databaseLookup',
+                  icon: 'search',
+                  schema: {
+                    "label": "Database Lookup",
+                    "labelPosition": "top",
+                    "widget": "choicesjs",
+                    "type": "select",
+                    "dataSrc": "url",
+                    "properties": {
+                       "isSqlTemplate": "true",
+                       "sqlTable": "",
+                       "sqlColumn": ""
+                    },
+                    // This custom array will hold the mapping (Database Column -> Form Field)
+                    "customFilterMapping": [
+                       { "dbColumn": "", "formField": "" }
+                    ],
+                    "data": {
+                        "url": "",
+                        "headers": [
+                            { "key": "Authorization", "value": "Bearer YOUR_TOKEN_LOGIC_IF_NEEDED" }
+                        ]
+                    },
+                    "valueProperty": "data",
+                    "idPath": "id",
+                    "template": "<span></span>",
+                    "filter": "",
+                    "searchEnabled": true,
+                    "authenticate": true,
+                    "input": true,
+                    "tableView": true
+                  }
+                }
+              }
+            }
+          },
+          editForm: {
+             select: [
+                {
+                   key: 'display',
+                   components: [
+                      {
+                         weight: -1000,
+                         type: 'panel',
+                         title: '⚡ Easy Database Setup',
+                         theme: 'primary',
+                         collapsible: false,
+                         customConditional: "show = !!(data.properties && data.properties.isSqlTemplate === 'true');",
+                         components: [
+                            {
+                               type: 'textfield',
+                               key: 'properties.sqlTable',
+                               label: 'Table Name',
+                               placeholder: 'e.g., tbl_order_details',
+                               description: 'The exact name of the database table you want to fetch.',
+                               input: true,
+                               validate: { required: true }
+                            },
+                            {
+                               type: 'textfield',
+                               key: 'properties.sqlColumn',
+                               label: 'Display Column Name',
+                               placeholder: 'e.g., ORDER_NO_C',
+                               description: 'The database column to display to the user in the dropdown list.',
+                               input: true,
+                               validate: { required: true }
+                            },
+                            // =========================================================================
+                            // Replaced the single input with a DataGrid to allow mandatory mapping
+                            // =========================================================================
+                            {
+                               type: 'datagrid',
+                               key: 'customFilterMapping',
+                               label: 'Filter Mapping (Required)',
+                               description: 'Map database columns to the form fields that will filter the results.',
+                               validate: { required: true, minLength: 1 },
+                               components: [
+                                  {
+                                     type: 'textfield',
+                                     key: 'dbColumn',
+                                     label: 'Database Column',
+                                     placeholder: 'e.g., ORDER_NO_C',
+                                     input: true,
+                                     validate: { required: true }
+                                  },
+                                  {
+                                     type: 'textfield',
+                                     key: 'formField',
+                                     label: 'Form Field Key',
+                                     placeholder: 'e.g., order_no_c',
+                                     input: true,
+                                     validate: { required: true }
+                                  }
+                               ]
+                            }
+                         ]
+                      }
+                   ]
+                }
+             ]
+          }
+        };
+
+        builderInstance = await Formio.builder(container, initialSchema || {}, builderOptions);
+
+        // =========================================================================
+        // Updated Magic Converter to process the Array Mapping
+        // =========================================================================
+        builderInstance.on('saveComponent', (component) => {
+          if (component.properties && component.properties.isSqlTemplate === 'true') {
+            const table = component.properties.sqlTable;
+            const column = component.properties.sqlColumn;
+            const mappings = component.customFilterMapping || [];
+
+            if (table) {
+              component.data.url = 'https://infinity-plus-services-493376716946.asia-south2.run.app/api/forms/sql-data?table=' + table;
+            }
+
+            if (column) {
+              component.template = '<span>{{ item.data.' + column + ' }}</span>';
+            }
+
+            // Loop through the DataGrid mapping array and build the chained filter string
+            if (mappings.length > 0) {
+              const filterParts = mappings
+                .filter(m => m.dbColumn && m.formField) // Ensure empty rows are ignored
+                .map(m => 'data.' + m.dbColumn + '={{data.' + m.formField + '}}');
+
+              component.filter = filterParts.join('&');
+            } else {
+              component.filter = '';
+            }
+          }
         });
 
         builderInstance.on('change', (schema) => { currentSchema = schema; markDirty(); });
