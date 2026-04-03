@@ -29,10 +29,7 @@ import static org.jooq.impl.DSL.*;
  * All endpoints here start with /api/internal/tooljet/ and are secured
  * by the ToolJetOAuth2ServerConfig (Machine-to-Machine RSA Tokens).
  */
-@RestController
-@RequestMapping("/api/internal/tooljet")
-@RequiredArgsConstructor
-@Slf4j
+@RestController @RequestMapping("/api/internal/tooljet") @RequiredArgsConstructor @Slf4j
 @Tag(name = "ToolJet Internal APIs",
         description = "Endpoints exclusively called by ToolJet via OAuth2 Client Credentials")
 public class ToolJetInternalController {
@@ -44,8 +41,7 @@ public class ToolJetInternalController {
     private final DSLContext dsl;
 
 
-    @Value("${app.backend.url}")
-    private String backendUrl;
+    @Value("${app.backend.url}") private String backendUrl;
 
     @Operation(summary = "Upload Base64 File to Drive (Called by ToolJet)")
     @PostMapping(value = "/storage/upload", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -111,8 +107,7 @@ public class ToolJetInternalController {
 
     // You can safely move the PermissionController's internal ToolJet logic here later
     // e.g., /api/internal/tooljet/permissions
-    @GetMapping("/permissions")
-    public ResponseEntity<?> getToolJetPermissions(
+    @GetMapping("/permissions") public ResponseEntity<?> getToolJetPermissions(
             @RequestParam(required = false) String userId,
             @RequestParam(required = false) String email,
             @RequestParam String organisationId) { // This is the workspace_uuid from ToolJet
@@ -121,9 +116,11 @@ public class ToolJetInternalController {
             // 1. Bridge Lookup: Find the Tenant mapping via ToolJet Workspace UUID
             // WHY: ToolJet identifies itself with its own UUID. We use our mapping table
             // (tbl_tooljet_workspaces) to resolve which internal tenant this belongs to.
-            ToolJetWorkspace mapping = toolJetWorkspaceRepository.findByWorkspaceUuid(organisationId)
-                    .orElseThrow(() -> new RuntimeException("No tenant mapping found for Workspace UUID: " +
-                            organisationId));
+            ToolJetWorkspace
+                    mapping =
+                    toolJetWorkspaceRepository.findByWorkspaceUuid(organisationId)
+                            .orElseThrow(() -> new RuntimeException("No tenant mapping found for Workspace UUID: " +
+                                    organisationId));
 
             // 2. Resolve Tenant & Schema
             // WHY: mapping.getTenant() already provides the full Tenant object thanks to the
@@ -152,11 +149,11 @@ public class ToolJetInternalController {
             // 4. Fetch all registered resources & actions from the Resolved Schema
             // WHY: This ensures we check permissions for every single action defined
             // specifically for this tenant's environment.
-            Result<Record2<String, String>> resourceActions = dsl.select(
-                            field("resource_key", String.class),
-                            field("action_name", String.class))
-                    .from(table(name(schema, "tbl_resource_actions")))
-                    .fetch();
+            Result<Record2<String, String>>
+                    resourceActions =
+                    dsl.select(field("resource_key", String.class), field("action_name", String.class))
+                            .from(table(name(schema, "tbl_resource_actions")))
+                            .fetch();
 
             Map<String, Boolean> permissions = new LinkedHashMap<>();
 
@@ -174,12 +171,14 @@ public class ToolJetInternalController {
                     organisationId,
                     internalTenantId);
 
-            return ResponseEntity.ok(Map.of(
-                    "userId", userId,
-                    "organisationId", organisationId,
-                    "tenantId", internalTenantId,
-                    "permissions", permissions
-            ));
+            return ResponseEntity.ok(Map.of("userId",
+                    userId,
+                    "organisationId",
+                    organisationId,
+                    "tenantId",
+                    internalTenantId,
+                    "permissions",
+                    permissions));
 
         } catch (Exception e) {
             log.error("❌ Failed to fetch internal permissions", e);
@@ -187,8 +186,7 @@ public class ToolJetInternalController {
         }
     }
 
-    @Data
-    public static class ToolJetUploadRequest {
+    @Data public static class ToolJetUploadRequest {
         private String fileName;
         private String mimeType;
         private String base64Data;
