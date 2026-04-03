@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Form Builder</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/formiojs@4.15.0/dist/formio.full.min.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"/>
+
+    <style>
+        /* ── THEME VARIABLES (From tailwind.config.js) ── */
+        :root {
+            --bg-canvas: #fafaf8;
+            --bg-canvas-subtle: #f5f4f0;
+            --bg-surface: #ffffff;
+            --text-primary: #1a1715;
+            --text-secondary: #4a443f;
+            --text-tertiary: #736d66;
+            --border-subtle: #eae8e1;
+
+            /* Brand (Terracotta) */
+            --brand-500: #e87548;
+            --brand-600: #d4593a;
+
+            /* Accent (Deep Plum) */
+            --accent-50: #faf5fa;
+            --accent-100: #f4ebf3;
+            --accent-200: #e9d5e8;
+            --accent-500: #a855a6;
+            --accent-600: #8b3f89;
+            --accent-700: #6f326f;
+
+            /* Status */
+            --status-success: #16a34a;
+            --status-warning: #ea580c;
+            --status-error: #dc2626;
+
+            /* Radii & Shadows */
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --shadow-soft: 0 1px 3px 0 rgba(26, 23, 21, 0.04), 0 1px 2px -1px rgba(26, 23, 21, 0.02);
+            --shadow-lifted: 0 4px 6px -1px rgba(26, 23, 21, 0.06), 0 2px 4px -2px rgba(26, 23, 21, 0.03);
+            --shadow-brand: 0 2px 8px -2px rgba(232, 117, 72, 0.25);
+            --shadow-accent: 0 2px 8px -2px rgba(168, 85, 166, 0.2);
+            --transition-smooth: all 0.2s ease-in-out;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: 'Inter', system-ui, sans-serif;
+            background: var(--bg-canvas);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; /* Prevent body scroll, wrapper handles it */
+            font-size: 13px;
+        }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a8a29e; }
+
+        /* ── Top Toolbar ─────────────────────────────── */
+        #toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 12px 24px;
+            flex-shrink: 0;
+            min-height: 64px;
+            box-shadow: var(--shadow-soft);
+            z-index: 10;
+        }
+
+        .toolbar-left { display: flex; align-items: center; gap: 20px; flex: 1; }
+
+        .btn-back {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: var(--radius-md);
+            transition: var(--transition-smooth);
+        }
+        .btn-back:hover { background: var(--bg-canvas-subtle); color: var(--text-primary); }
+
+        .title-wrapper {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            max-width: 400px;
+            padding-left: 20px;
+            border-left: 1px solid var(--border-subtle);
+        }
+
+        #form-title-input {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-primary);
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 18px;
+            font-weight: 700;
+            outline: none;
+            transition: var(--transition-smooth);
+            margin-left: -8px;
+            width: 100%;
+        }
+        #form-title-input:hover { background: var(--bg-canvas-subtle); }
+        #form-title-input:focus { background: var(--bg-surface); border-color: var(--brand-400); box-shadow: 0 0 0 3px rgba(232, 117, 72, 0.1); }
+
+        .path-group {
+            display: flex;
+            align-items: center;
+            font-size: 11px;
+            color: var(--text-tertiary);
+            font-family: monospace;
+            margin-top: 4px;
+        }
+        .path-group span { margin-right: 6px; font-weight: 600; letter-spacing: 0.05em; }
+
+        #form-path-input {
+            background: var(--accent-50);
+            border: 1px solid var(--accent-200);
+            color: var(--accent-700);
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: 600;
+            outline: none;
+            padding: 3px 8px;
+            border-radius: 6px;
+            width: 100%;
+            max-width: 250px;
+            transition: var(--transition-smooth);
+        }
+        #form-path-input:focus { background: var(--bg-surface); border-color: var(--accent-500); box-shadow: var(--shadow-accent); }
+
+        .btn-save {
+            padding: 10px 20px;
+            border-radius: var(--radius-md);
+            border: none;
+            background: var(--brand-500);
+            color: #fff;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: var(--shadow-brand);
+            transition: var(--transition-smooth);
+        }
+        .btn-save:hover:not(:disabled) { background: var(--brand-600); transform: translateY(-1px); }
+        .btn-save:disabled { background: var(--border-subtle); color: var(--text-tertiary); cursor: not-allowed; box-shadow: none; transform: none; }
+
+        /* ── Status bar ───────────────────────────────── */
+        #status-bar {
+            background: var(--bg-surface);
+            color: var(--text-tertiary);
+            font-size: 11px;
+            font-weight: 600;
+            padding: 8px 24px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+            border-top: 1px solid var(--border-subtle);
+        }
+        #status-bar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--status-success); }
+        #status-bar.saving .dot { background: var(--status-warning); animation: pulseSoft 2s infinite; }
+        #status-bar.error .dot { background: var(--status-error); }
+        @keyframes pulseSoft { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        /* ── Builder area ────────────────────────────── */
+        #builder-wrapper {
+            flex: 1;
+            overflow-y: auto; /* Natural scrolling for the whole workspace */
+            padding: 24px;
+            display: block; /* Removed flex centering that caused clipping */
+        }
+
+        #formio-builder {
+            background: var(--bg-surface);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
+            box-shadow: var(--shadow-lifted);
+            max-width: 1400px;
+            margin: 0 auto; /* Center naturally */
+            padding: 20px;
+        }
+
+        /* ── AESTHETIC OVERRIDES ONLY (No structural layout hacks!) ── */
+        .formio-dialog { z-index: 10000 !important; }
+
+        /* Sidebar Panels */
+        .builder-sidebar .card { border-color: var(--border-subtle) !important; margin-bottom: 12px !important; border-radius: var(--radius-md) !important; box-shadow: var(--shadow-soft) !important;}
+        .builder-sidebar .card-header { padding: 10px 14px !important; font-size: 12px !important; font-weight: 700 !important; background: var(--accent-50) !important; color: var(--accent-700) !important; border-bottom: 1px solid var(--accent-200) !important; text-transform: uppercase; letter-spacing: 0.05em; }
+        .builder-sidebar .card-body { padding: 10px !important; }
+
+        /* Sidebar Buttons */
+        .builder-group-button {
+            padding: 8px 12px !important;
+            font-size: 12px !important;
+            font-weight: 500 !important;
+            margin-bottom: 6px !important;
+            border: 1px solid var(--border-subtle) !important;
+            border-radius: var(--radius-sm) !important;
+            color: var(--text-secondary) !important;
+            background: var(--bg-surface) !important;
+            transition: var(--transition-smooth) !important;
+            box-shadow: none !important;
+            width: 100% !important;
+            text-align: left !important;
+        }
+        .builder-group-button i { margin-right: 8px !important; color: var(--accent-500) !important; font-size: 14px !important; width: 20px; text-align: center; }
+        .builder-group-button:hover { background: var(--accent-50) !important; color: var(--accent-700) !important; border-color: var(--accent-300) !important; transform: translateX(2px); }
+
+        /* Canvas */
+        .builder-components {
+            padding: 20px !important;
+            background: var(--bg-canvas) !important;
+            border: 2px dashed #d6d3d1 !important;
+            border-radius: var(--radius-md) !important;
+        }
+        .builder-component { padding: 16px !important; margin-bottom: 12px !important; border: 1px solid var(--border-subtle) !important; border-radius: var(--radius-md) !important; background: var(--bg-surface) !important; box-shadow: var(--shadow-soft) !important; transition: var(--transition-smooth) !important;}
+        .builder-component:hover { border-color: var(--brand-400) !important; box-shadow: var(--shadow-lifted) !important; }
+        .component-btn-group .btn { padding: 4px 8px !important; font-size: 11px !important; border-radius: 4px !important;}
+
+        /* Form Inputs */
+        .form-control { font-size: 13px !important; padding: 6px 12px !important; height: auto !important; border-radius: var(--radius-sm) !important; border: 1px solid #d6d3d1 !important; color: var(--text-primary) !important; background: var(--bg-surface) !important; transition: var(--transition-smooth) !important;}
+        .form-control:focus { border-color: var(--accent-500) !important; box-shadow: 0 0 0 3px rgba(168, 85, 166, 0.15) !important; outline: none !important;}
+        .col-form-label, .control-label { font-size: 13px !important; font-weight: 600 !important; color: var(--text-secondary) !important; margin-bottom: 6px !important; }
+
+        .btn { font-size: 13px !important; padding: 8px 16px !important; border-radius: var(--radius-md) !important; font-weight: 600 !important; }
+        .btn-primary { background-color: var(--brand-500) !important; border-color: var(--brand-500) !important; }
+        .btn-primary:hover { background-color: var(--brand-600) !important; }
+
+        /* Settings Popup Modal */
+        .formio-dialog-content { border-radius: var(--radius-lg) !important; border: 1px solid var(--border-subtle) !important; box-shadow: var(--shadow-lifted) !important; padding: 0 !important; }
+        .component-settings .nav-tabs { border-bottom: 1px solid var(--border-subtle) !important; padding: 0 16px !important; background: var(--bg-canvas-subtle) !important; border-radius: var(--radius-lg) var(--radius-lg) 0 0 !important; }
+        .component-settings .nav-tabs .nav-link { padding: 12px 16px !important; font-size: 13px !important; font-weight: 600 !important; color: var(--text-tertiary) !important; border: none !important; border-bottom: 2px solid transparent !important; transition: var(--transition-smooth) !important; }
+        .component-settings .nav-tabs .nav-link.active { color: var(--accent-700) !important; background: transparent !important; border-bottom: 2px solid var(--accent-500) !important; }
+        .component-settings .nav-tabs .nav-link:hover:not(.active) { color: var(--accent-500) !important; border-bottom: 2px solid var(--border-subtle) !important; }
+
+        /* ── Loading / Error overlay ──────────────────── */
+        #overlay {
+            position: fixed; inset: 0; background: rgba(250, 250, 248, 0.85); backdrop-filter: blur(4px);
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+            color: var(--text-secondary); z-index: 9999;
+        }
+        #overlay.hidden { display: none; }
+        #overlay .spinner { width: 36px; height: 36px; border: 3px solid var(--border-subtle); border-top-color: var(--accent-500); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        #overlay .message { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div id="overlay">
+    <div class="spinner"></div>
+    <div class="message" id="overlay-message">Initializing workspace…</div>
+</div>
+
+<div id="toolbar">
+    <div class="toolbar-left">
+        <button class="btn-back" id="btn-cancel">
+            <i class="fas fa-arrow-left"></i> Back to Forms
+        </button>
+        <div class="title-wrapper">
+            <input id="form-title-input" type="text" placeholder="Untitled Form..." value=""/>
+            <div class="path-group">
+                <span>API ID:</span>
+                <input id="form-path-input" type="text" placeholder="auto-generated-id" />
+            </div>
+        </div>
+    </div>
+    <button class="btn-save" id="btn-save" disabled>
+        <i class="fas fa-check"></i> <span id="save-label">Save Form</span>
+    </button>
+</div>
+
+<div id="builder-wrapper">
+    <div id="formio-builder"></div>
+</div>
+
+<div id="status-bar">
+    <div class="dot"></div>
+    <span id="status-text">Ready</span>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/formiojs@4.15.0/dist/formio.full.min.js"></script>
+
+<script>
+    (function () {
+      'use strict';
+
+      const params      = new URLSearchParams(window.location.search);
+      const jwtToken    = params.get('token');
+      const editPath    = params.get('formPath');
+      const backendBase = params.get('api') || (window.location.origin + '/api');
+
+      const FORMS_API   = backendBase + '/forms';
+      const BFF_API     = backendBase + '/formio-bff';
+
+      let builderInstance = null;
+      let currentSchema   = {};
+      let isDirty         = false;
+      let existingFormId  = null;
+      let isPathManuallyEdited = !!editPath;
+
+      const overlay      = document.getElementById('overlay');
+      const overlayMsg   = document.getElementById('overlay-message');
+      const statusBar    = document.getElementById('status-bar');
+      const statusText   = document.getElementById('status-text');
+      const titleInput   = document.getElementById('form-title-input');
+      const pathInput    = document.getElementById('form-path-input');
+      const btnSave      = document.getElementById('btn-save');
+      const saveLabel    = document.getElementById('save-label');
+      const btnCancel    = document.getElementById('btn-cancel');
+
+      function showOverlay(msg, isError = false) {
+        if (isError) overlayMsg.style.color = 'var(--status-error)';
+        overlayMsg.textContent = msg;
+        overlay.classList.remove('hidden');
+      }
+      function hideOverlay() { overlay.classList.add('hidden'); }
+      function setStatus(msg, state = 'ready') { statusBar.className = state; statusText.textContent = msg; }
+
+      function toSlug(str) {
+        return str.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      }
+
+      titleInput.addEventListener('input', () => {
+        if (!isPathManuallyEdited) {
+            pathInput.value = toSlug(titleInput.value);
+        }
+        markDirty();
+      });
+
+      pathInput.addEventListener('input', () => {
+        isPathManuallyEdited = true;
+        markDirty();
+      });
+
+      pathInput.addEventListener('blur', () => {
+        pathInput.value = toSlug(pathInput.value);
+      });
+
+      function markDirty() {
+          isDirty = true;
+          btnSave.disabled = !titleInput.value.trim() || !pathInput.value.trim();
+      }
+
+      async function fetchConfig() {
+        const res = await fetch(BFF_API + '/config', { headers: { 'Authorization': 'Bearer ' + jwtToken } });
+        if (!res.ok) throw new Error('Could not fetch builder config: ' + res.status);
+        return await res.json();
+      }
+
+      async function loadExistingForm(formPath) {
+        const res = await fetch(FORMS_API + '/' + formPath, {
+          headers: { 'Authorization': 'Bearer ' + jwtToken }
+        });
+        if (!res.ok) throw new Error('Form not found: ' + formPath);
+        const form = await res.json();
+        existingFormId = form._id;
+
+        titleInput.value = form.title || formPath;
+        pathInput.value  = form.path || formPath;
+        isPathManuallyEdited = true;
+
+        return form;
+      }
+
+      async function initBuilder(initialSchema) {
+        const originalFetch = Formio.fetch;
+        Formio.fetch = function(url, options) {
+          options = options || {};
+          options.headers = options.headers || {};
+          options.headers['Authorization'] = 'Bearer ' + jwtToken;
+          return originalFetch.call(this, url, options);
+        };
+
+        Formio.setUser({ _id: 'admin', data: { email: 'admin@tenant.local' } });
+        Formio.setBaseUrl(FORMS_API);
+        Formio.setProjectUrl(FORMS_API);
+
+        const container = document.getElementById('formio-builder');
+
+        builderInstance = await Formio.builder(container, initialSchema || {}, {
+          noDefaultSubmitButton: false
+        });
+
+        builderInstance.on('change', (schema) => { currentSchema = schema; markDirty(); });
+        hideOverlay();
+        btnSave.disabled = !titleInput.value.trim() || !pathInput.value.trim();
+      }
+
+      async function saveForm() {
+        const title = titleInput.value.trim();
+        let path = pathInput.value.trim();
+
+        if (!title) { alert('Please enter a form title.'); return; }
+        path = toSlug(path);
+        if (!path) { alert('Form ID must contain at least one letter or number.'); return; }
+        pathInput.value = path;
+
+        btnSave.disabled = true; saveLabel.textContent = 'Saving…'; setStatus('Saving to database…', 'saving');
+
+        const formPayload = { ...currentSchema, title, name: path, path, type: 'form', display: currentSchema.display || 'form' };
+
+        try {
+          let res;
+          if (existingFormId) {
+            res = await fetch(FORMS_API + '/form/' + existingFormId, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwtToken },
+              body: JSON.stringify(formPayload)
+            });
+          } else {
+            res = await fetch(FORMS_API + '/form', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwtToken },
+              body: JSON.stringify(formPayload)
+            });
+          }
+
+          if (!res.ok) { const err = await res.text(); throw new Error(err); }
+          const saved = await res.json();
+          existingFormId = saved._id || existingFormId;
+          isDirty = false;
+          btnSave.disabled = false; saveLabel.textContent = 'Save Form';
+          setStatus('Saved successfully ✓', 'ready');
+
+          window.parent.postMessage({ type: 'FORMIO_FORM_SAVED', formId: saved._id, formPath: saved.path, formTitle: saved.title }, '*');
+        } catch (e) {
+          console.error('Save failed:', e);
+          btnSave.disabled = false; saveLabel.textContent = 'Save Form';
+          setStatus('Save failed', 'error');
+          alert('Failed to save form. Please check your connection.');
+        }
+      }
+
+      function cancel() {
+        if (isDirty && !confirm('You have unsaved changes. Are you sure you want to discard them?')) return;
+        window.parent.postMessage({ type: 'FORMIO_BUILDER_CLOSED' }, '*');
+      }
+
+      btnSave.addEventListener('click', saveForm);
+      btnCancel.addEventListener('click', cancel);
+
+      (async function boot() {
+        try {
+          if (!jwtToken) throw new Error('No authentication token provided.');
+          const config = await fetchConfig();
+
+          let initialSchema = {};
+          if (editPath) initialSchema = await loadExistingForm(editPath);
+
+          await initBuilder(initialSchema);
+        } catch (err) {
+          console.error('Builder boot failed:', err);
+          showOverlay('Failed to load: ' + err.message, true);
+          setStatus('Offline', 'error');
+        }
+      })();
+
+    })();
+</script>
+</body>
+</html>

@@ -73,4 +73,18 @@ public class UserContextService {
         return (Map<String, Object>) auth.getPrincipal();
     }
 
+    /** NEW: Returns the URL-safe slug (e.g. "saar-biotech") used as the form path prefix. */
+    public String getCurrentTenantSlug() {
+        return (String) getClaim("tenantSlug");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object getClaim(String key) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) return null;
+        if (!(auth.getPrincipal() instanceof Map)) return null;
+        return ((Map<String, Object>) auth.getPrincipal()).get(key);
+    }
+
+
 }

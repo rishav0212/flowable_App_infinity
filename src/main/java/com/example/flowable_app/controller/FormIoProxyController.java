@@ -1,13 +1,12 @@
 package com.example.flowable_app.controller;
 
 import com.example.flowable_app.client.FormIoClient;
-import com.example.flowable_app.service.DataMirrorService;
-import com.example.flowable_app.service.FormIoAuthService;
-import com.example.flowable_app.service.FormSchemaService;
-import com.example.flowable_app.service.SchemaSyncService;
+import com.example.flowable_app.service.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,6 +31,8 @@ import java.util.regex.Pattern;
 @Slf4j
 public class FormIoProxyController {
 
+    private static final String PREFIX_SEPARATOR = "--";
+
     private final FormIoAuthService authService;
     private final RestTemplate restTemplate = new RestTemplate();
     private final SchemaSyncService schemaSyncService;
@@ -39,6 +40,7 @@ public class FormIoProxyController {
     private final FormIoClient formIoClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final FormSchemaService formSchemaService;
+    private final UserContextService userContextService; // Added to retrieve secure tenant context
 
     // Regex: Matches .../form/{formId}/submission
     private final Pattern SUBMISSION_PATTERN = Pattern.compile(".*/form/([^/]+)/submission");
@@ -50,12 +52,14 @@ public class FormIoProxyController {
                                  SchemaSyncService schemaSyncService,
                                  DataMirrorService dataMirrorService,
                                  FormIoClient formIoClient,
-                                 FormSchemaService formSchemaService) {
+                                 FormSchemaService formSchemaService,
+                                 UserContextService userContextService) {
         this.authService = authService;
         this.schemaSyncService = schemaSyncService;
         this.dataMirrorService = dataMirrorService;
         this.formIoClient = formIoClient;
         this.formSchemaService = formSchemaService;
+        this.userContextService = userContextService;
     }
 
     // =================================================================
@@ -96,11 +100,51 @@ public class FormIoProxyController {
             HttpServletRequest request) {
 
         String requestPath = request.getRequestURI().substring("/api/forms".length());
+        String tenantSlug = userContextService.getCurrentTenantSlug();
+        String tenantId = userContextService.getCurrentTenantId();
 
-        log.info("🌍 PROXY REQUEST: [{}] {}", method, requestPath);
+        log.info("🌍 PROXY REQUEST: [{}] {} | Tenant: {}", method, requestPath, tenantSlug);
 
-        URI uri = UriComponentsBuilder.fromHttpUrl(formIoUrl + requestPath)
-                .query(request.getQueryString())
+        // ==============================================================
+        // 🛑 TENANT TRANSFORMATION — intercept before forwarding
+        // ==============================================================
+        String transformedPath = requestPath;
+        String transformedBody = body;
+        String transformedQuery = request.getQueryString();
+
+        if (tenantSlug != null) {
+            // UPDATED: We now pass the HttpMethod so we can properly differentiate
+            // between a GET /form (list) and a POST /form (create) request.
+            PathType pathType = classifyPath(requestPath, method);
+
+            // We intercept the request data and dynamically modify it to append the tenant prefix.
+            // This ensures that Form.io stores tenant data in isolated paths without the frontend knowing.
+            switch (pathType) {
+                case FORM_LIST:
+                    transformedQuery = injectTenantFilter(transformedQuery, tenantId);
+                    break;
+                case FORM_CREATE:
+                case FORM_UPDATE_BY_ID:
+                    // UPDATED: This now triggers on both POST (create) and PUT (update by ID).
+                    // This fixes the "Invalid alias" bug because the JSON body will always
+                    // contain the properly prefixed tenant path.
+                    if (body != null) {
+                        transformedBody = injectTenantIntoFormBody(body, tenantSlug, tenantId);
+                    }
+                    break;
+                case FORM_SPECIFIC:
+                    transformedPath = addPrefixToSpecificPath(requestPath, tenantSlug);
+                    break;
+                case FORM_SPECIFIC_CHILD:
+                    transformedPath = addPrefixToChildPath(requestPath, tenantSlug);
+                    break;
+                case OTHER:
+                    break;
+            }
+        }
+
+        URI uri = UriComponentsBuilder.fromHttpUrl(formIoUrl + transformedPath)
+                .query(transformedQuery)
                 .build(true)
                 .toUri();
 
@@ -129,8 +173,10 @@ public class FormIoProxyController {
 
                         // REUSE: Calling the SAME universal method as /sql-data
                         // DataMirrorService handles auto-tenant schema insertion and case sensitivity.
+                        // We strip the tenant prefix from the formPath so it accurately matches the local SQL table name.
+                        String strippedPath = stripTenantPrefix(formPath, tenantSlug);
                         List<Map<String, Object>> sqlData =
-                                dataMirrorService.fetchTableData("tbl_" + formPath, queryParams);
+                                dataMirrorService.fetchTableData("tbl_" + strippedPath, queryParams);
 
                         log.info("✅ Served {} records from SQL for form '{}'", sqlData.size(), formPath);
                         return ResponseEntity.ok(sqlData);
@@ -146,7 +192,7 @@ public class FormIoProxyController {
         HttpHeaders headers = new HttpHeaders();
         headers.set("x-jwt-token", token);
         headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<String> entity = new HttpEntity<>(body, headers);
+        HttpEntity<String> entity = new HttpEntity<>(transformedBody, headers);
 
         try {
             ResponseEntity<String> response = restTemplate.exchange(uri, method, entity, String.class);
@@ -209,12 +255,38 @@ public class FormIoProxyController {
             }
 
             // Schema Sync
-            boolean isFormDef = requestPath.contains("/form") && !requestPath.contains("/submission");
-            if (isFormDef && isWrite && response.getStatusCode().is2xxSuccessful() && body != null) {
-                new Thread(() -> schemaSyncService.syncFormDefinition(body)).start();
+//            boolean isFormDef = requestPath.contains("/form") && !requestPath.contains("/submission");
+//            if (isFormDef && isWrite && response.getStatusCode().is2xxSuccessful() && transformedBody != null) {
+//                // Create an effectively final copy for the lambda thread
+//                final String payloadToSync = transformedBody;
+//                new Thread(() -> schemaSyncService.syncFormDefinition(payloadToSync)).start();
+//            }
+
+            // ==============================================================
+            // 🛑 RESPONSE TRANSFORMATION — strip tenant prefix before returning
+            // ==============================================================
+// ==============================================================// ==============================================================
+            Object finalResponseBody = response.getBody();
+            if (response.getBody() != null) {
+                try {
+                    // Parse into a Jackson Node so Spring Boot properly returns JSON, not a JSON String Literal
+                    JsonNode root = objectMapper.readTree(response.getBody());
+                    if (tenantSlug != null) {
+                        if (root.isArray()) {
+                            for (JsonNode node : root) stripPrefixFromNode(node, tenantSlug);
+                        } else {
+                            stripPrefixFromNode(root, tenantSlug);
+                        }
+                    }
+                    finalResponseBody = root;
+                } catch (Exception e) {
+                    // Fallback to raw string if it's not valid JSON
+                    finalResponseBody = response.getBody();
+                }
             }
 
-            return cleanResponse(response);
+            return cleanResponse(response, finalResponseBody);
+
 
         } catch (HttpClientErrorException.Unauthorized e) {
             authService.invalidateToken();
@@ -225,16 +297,24 @@ public class FormIoProxyController {
         }
     }
 
-    private ResponseEntity<Object> cleanResponse(ResponseEntity<String> upstreamResponse) {
+    // UPDATED: Now accepts an Object body instead of extracting it from upstreamResponse
+// UPDATED: Now accepts an Object body instead of extracting it from upstreamResponse
+    private ResponseEntity<Object> cleanResponse(ResponseEntity<String> upstreamResponse, Object body) {
         HttpHeaders cleanHeaders = new HttpHeaders();
-        cleanHeaders.putAll(upstreamResponse.getHeaders());
-        cleanHeaders.remove("Access-Control-Allow-Origin");
-        cleanHeaders.remove("Access-Control-Allow-Credentials");
-        cleanHeaders.remove("Access-Control-Allow-Methods");
-        cleanHeaders.remove("Access-Control-Allow-Headers");
-        return new ResponseEntity<>(upstreamResponse.getBody(), cleanHeaders, upstreamResponse.getStatusCode());
-    }
+        if (upstreamResponse != null && upstreamResponse.getHeaders() != null) {
+            cleanHeaders.putAll(upstreamResponse.getHeaders());
+            cleanHeaders.remove("Access-Control-Allow-Origin");
+            cleanHeaders.remove("Access-Control-Allow-Credentials");
+            cleanHeaders.remove("Access-Control-Allow-Methods");
+            cleanHeaders.remove("Access-Control-Allow-Headers");
 
+            // 🛑 CRITICAL FIX: We modified the size of the JSON body by removing the tenant prefixes.
+            // We MUST delete the old Content-Length header so Spring Boot recalculates the new, correct size!
+            cleanHeaders.remove("Content-Length");
+        }
+        HttpStatus status = upstreamResponse != null ? HttpStatus.valueOf(upstreamResponse.getStatusCode().value()) : HttpStatus.OK;
+        return new ResponseEntity<>(body, cleanHeaders, status);
+    }
     private boolean hasSqlTag(Map<String, Object> formDef) {
         List<String> tags = (List<String>) formDef.get("tags");
         if (tags != null) {
@@ -243,5 +323,159 @@ public class FormIoProxyController {
             }
         }
         return false;
+    }
+
+    // =============================================================================
+    // 🔒 TENANT TRANSFORMATION HELPERS
+    // =============================================================================
+
+    // UPDATED: Takes HttpMethod to tell POST vs GET apart for the exact same `/form` URL
+    private PathType classifyPath(String path, HttpMethod method) {
+        String p = path.startsWith("/") ? path.substring(1) : path;
+
+        // /form Endpoint (POST is Creation, GET is List Fetch)
+        if (p.equals("form") || p.startsWith("form?")) {
+            if (method == HttpMethod.POST) return PathType.FORM_CREATE;
+            return PathType.FORM_LIST;
+        }
+
+        // /form/{id} Endpoint (PUT is Update)
+        if (p.startsWith("form/")) {
+            if (method == HttpMethod.PUT && !p.contains("/submission")) return PathType.FORM_UPDATE_BY_ID;
+            return PathType.OTHER; // It's likely a submission or other nested resource
+        }
+
+        if (p.isEmpty()) return PathType.FORM_CREATE;
+        if (p.contains("/")) return PathType.FORM_SPECIFIC_CHILD;
+        return PathType.FORM_SPECIFIC;
+    }
+
+    private String injectTenantFilter(String existingQuery, String tenantId) {
+        // Querying by tag is native, fast, and avoids all Regex encoding bugs!
+        String filter = "tags=tenant:" + tenantId;
+        if (existingQuery == null || existingQuery.isEmpty()) return filter;
+        return existingQuery + "&" + filter;
+    }
+
+    private String injectTenantIntoFormBody(String body, String tenantSlug, String tenantId) {
+        try {
+            ObjectNode formJson = (ObjectNode) objectMapper.readTree(body);
+
+            String originalPath = formJson.has("path") ? formJson.get("path").asText() : "";
+            if (!originalPath.startsWith(tenantSlug + PREFIX_SEPARATOR)) {
+                formJson.put("path", tenantSlug + PREFIX_SEPARATOR + originalPath);
+            }
+
+            // UPDATED: Form.io names reject spaces/brackets. Using 'tenantSlug-' instead of '[tenantSlug] '
+            if (formJson.has("name")) {
+                String name = formJson.get("name").asText();
+                String namePrefix = tenantSlug + "-";
+                if (!name.startsWith(namePrefix)) {
+                    formJson.put("name", namePrefix + name);
+                }
+            }
+
+            // UPDATED: Ensure machineName follows the same safe format if it was auto-generated
+            if (formJson.has("machineName")) {
+                String machineName = formJson.get("machineName").asText();
+                String namePrefix = tenantSlug + "-";
+                if (!machineName.startsWith(namePrefix)) {
+                    formJson.put("machineName", namePrefix + machineName);
+                }
+            }
+
+            ArrayNode tags = formJson.has("tags") && formJson.get("tags").isArray()
+                    ? (ArrayNode) formJson.get("tags")
+                    : objectMapper.createArrayNode();
+
+            String tenantTag = "tenant:" + tenantId;
+            boolean hasTag = false;
+            for (JsonNode t : tags) {
+                if (t.asText().equals(tenantTag)) {
+                    hasTag = true;
+                    break;
+                }
+            }
+            if (!hasTag) tags.add(tenantTag);
+            formJson.set("tags", tags);
+
+            return objectMapper.writeValueAsString(formJson);
+        } catch (Exception e) {
+            log.warn("⚠️ Could not inject tenant into form body: {}", e.getMessage());
+            return body;
+        }
+    }
+
+    private String addPrefixToSpecificPath(String requestPath, String tenantSlug) {
+        String clean = requestPath.startsWith("/") ? requestPath.substring(1) : requestPath;
+        if (clean.startsWith(tenantSlug + PREFIX_SEPARATOR)) return requestPath;
+        return "/" + tenantSlug + PREFIX_SEPARATOR + clean;
+    }
+
+    private String addPrefixToChildPath(String requestPath, String tenantSlug) {
+        int slashIdx = requestPath.indexOf("/", 1);
+        if (slashIdx == -1) return requestPath;
+        String formPart = requestPath.substring(1, slashIdx);
+        String childPart = requestPath.substring(slashIdx);
+        if (formPart.startsWith(tenantSlug + PREFIX_SEPARATOR)) return requestPath;
+        return "/" + tenantSlug + PREFIX_SEPARATOR + formPart + childPart;
+    }
+
+    private String stripTenantPrefix(String path, String tenantSlug) {
+        if (tenantSlug == null || path == null) return path;
+        String prefix = tenantSlug + PREFIX_SEPARATOR;
+        return path.startsWith(prefix) ? path.substring(prefix.length()) : path;
+    }
+
+    private String stripTenantPrefixFromResponse(String responseBody, String tenantSlug) {
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            if (root.isArray()) {
+                for (JsonNode node : root) stripPrefixFromNode(node, tenantSlug);
+            } else {
+                stripPrefixFromNode(root, tenantSlug);
+            }
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception e) {
+            return responseBody;
+        }
+    }
+
+    private void stripPrefixFromNode(JsonNode node, String tenantSlug) {
+        if (!(node instanceof ObjectNode)) return;
+        ObjectNode obj = (ObjectNode) node;
+
+        if (obj.has("path")) {
+            String path = obj.get("path").asText();
+            obj.put("path", stripTenantPrefix(path, tenantSlug));
+        }
+
+        // UPDATED: Strip the safe hyphen-based name prefix
+        if (obj.has("name")) {
+            String name = obj.get("name").asText();
+            String namePrefix = tenantSlug + "-";
+            if (name.startsWith(namePrefix)) {
+                obj.put("name", name.substring(namePrefix.length()));
+            }
+        }
+
+        // UPDATED: Strip the safe hyphen-based machineName prefix
+        if (obj.has("machineName")) {
+            String machineName = obj.get("machineName").asText();
+            String namePrefix = tenantSlug + "-";
+            if (machineName.startsWith(namePrefix)) {
+                obj.put("machineName", machineName.substring(namePrefix.length()));
+            }
+        }
+    }
+
+    // UPDATED: Added FORM_UPDATE_BY_ID to clearly distinguish PUT updates
+    private enum PathType {
+        FORM_LIST,
+        FORM_CREATE,
+        FORM_UPDATE_BY_ID,
+        FORM_SPECIFIC,
+        FORM_SPECIFIC_CHILD,
+        OTHER
     }
 }

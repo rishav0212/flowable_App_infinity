@@ -38,6 +38,9 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http.cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(AbstractHttpConfigurer::disable)
+                .headers(headers -> headers
+                        .frameOptions(frameOptions -> frameOptions.disable())
+                )
 
                 // 🛑 1. ENABLE STATELESS SESSIONS (No more server-side memory)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -78,8 +81,11 @@ public class SecurityConfig {
                                     return false;
                                 }).permitAll()
 
+
                                 // 3. Explicitly allow the ticketed entry
                                 .requestMatchers(AntPathRequestMatcher.antMatcher("/tooljet/ticket/**")).permitAll()
+                                .requestMatchers(AntPathRequestMatcher.antMatcher("/form-builder.html"))
+                                .permitAll()
                                 // All other API calls require the JWT badge
                                 .anyRequest()
                                 .authenticated()
