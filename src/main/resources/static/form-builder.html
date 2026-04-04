@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"/>
 
     <style>
-        /* ── THEME VARIABLES (From tailwind.config.js) ── */
+        /* ── THEME VARIABLES ── */
         :root {
             --bg-canvas: #fafaf8;
             --bg-canvas-subtle: #f5f4f0;
@@ -58,7 +58,7 @@
             height: 100vh;
             display: flex;
             flex-direction: column;
-            overflow: hidden; /* Prevent body scroll, wrapper handles it */
+            overflow: hidden;
             font-size: 13px;
         }
 
@@ -67,7 +67,7 @@
         ::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #a8a29e; }
 
-        /* ── Top Toolbar ─────────────────────────────── */
+        /* ── Top Toolbar ── */
         #toolbar {
             display: flex;
             align-items: center;
@@ -101,11 +101,16 @@
 
         .title-wrapper {
             display: flex;
-            flex-direction: column;
+            align-items: center;
             flex: 1;
-            max-width: 400px;
             padding-left: 20px;
             border-left: 1px solid var(--border-subtle);
+        }
+
+        .title-inputs {
+            display: flex;
+            flex-direction: column;
+            max-width: 400px;
         }
 
         #form-title-input {
@@ -150,6 +155,39 @@
         }
         #form-path-input:focus { background: var(--bg-surface); border-color: var(--accent-500); box-shadow: var(--shadow-accent); }
 
+        .form-settings-group {
+            margin-left: 30px;
+            padding-left: 30px;
+            border-left: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+        }
+
+        .sql-sync-label {
+            margin: 0;
+            font-weight: 700;
+            font-size: 13px;
+            color: var(--brand-600);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(232, 117, 72, 0.1);
+            padding: 8px 14px;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(232, 117, 72, 0.2);
+            transition: var(--transition-smooth);
+        }
+        .sql-sync-label:hover {
+            background: rgba(232, 117, 72, 0.15);
+        }
+        .sql-sync-label input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: var(--brand-500);
+        }
+
         .btn-save {
             padding: 10px 20px;
             border-radius: var(--radius-md);
@@ -168,7 +206,7 @@
         .btn-save:hover:not(:disabled) { background: var(--brand-600); transform: translateY(-1px); }
         .btn-save:disabled { background: var(--border-subtle); color: var(--text-tertiary); cursor: not-allowed; box-shadow: none; transform: none; }
 
-        /* ── Status bar ───────────────────────────────── */
+        /* ── Status bar ── */
         #status-bar {
             background: var(--bg-surface);
             color: var(--text-tertiary);
@@ -186,12 +224,12 @@
         #status-bar.error .dot { background: var(--status-error); }
         @keyframes pulseSoft { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
-        /* ── Builder area ────────────────────────────── */
+        /* ── Builder area ── */
         #builder-wrapper {
             flex: 1;
-            overflow-y: auto; /* Natural scrolling for the whole workspace */
+            overflow-y: auto;
             padding: 24px;
-            display: block; /* Removed flex centering that caused clipping */
+            display: block;
         }
 
         #formio-builder {
@@ -200,19 +238,17 @@
             border: 1px solid var(--border-subtle);
             box-shadow: var(--shadow-lifted);
             max-width: 1400px;
-            margin: 0 auto; /* Center naturally */
+            margin: 0 auto;
             padding: 20px;
         }
 
-        /* ── AESTHETIC OVERRIDES ONLY (No structural layout hacks!) ── */
+        /* ── AESTHETIC OVERRIDES ONLY ── */
         .formio-dialog { z-index: 10000 !important; }
 
-        /* Sidebar Panels */
         .builder-sidebar .card { border-color: var(--border-subtle) !important; margin-bottom: 12px !important; border-radius: var(--radius-md) !important; box-shadow: var(--shadow-soft) !important;}
         .builder-sidebar .card-header { padding: 10px 14px !important; font-size: 12px !important; font-weight: 700 !important; background: var(--accent-50) !important; color: var(--accent-700) !important; border-bottom: 1px solid var(--accent-200) !important; text-transform: uppercase; letter-spacing: 0.05em; }
         .builder-sidebar .card-body { padding: 10px !important; }
 
-        /* Sidebar Buttons */
         .builder-group-button {
             padding: 8px 12px !important;
             font-size: 12px !important;
@@ -230,7 +266,6 @@
         .builder-group-button i { margin-right: 8px !important; color: var(--accent-500) !important; font-size: 14px !important; width: 20px; text-align: center; }
         .builder-group-button:hover { background: var(--accent-50) !important; color: var(--accent-700) !important; border-color: var(--accent-300) !important; transform: translateX(2px); }
 
-        /* Canvas */
         .builder-components {
             padding: 20px !important;
             background: var(--bg-canvas) !important;
@@ -241,7 +276,6 @@
         .builder-component:hover { border-color: var(--brand-400) !important; box-shadow: var(--shadow-lifted) !important; }
         .component-btn-group .btn { padding: 4px 8px !important; font-size: 11px !important; border-radius: 4px !important;}
 
-        /* Form Inputs */
         .form-control { font-size: 13px !important; padding: 6px 12px !important; height: auto !important; border-radius: var(--radius-sm) !important; border: 1px solid #d6d3d1 !important; color: var(--text-primary) !important; background: var(--bg-surface) !important; transition: var(--transition-smooth) !important;}
         .form-control:focus { border-color: var(--accent-500) !important; box-shadow: 0 0 0 3px rgba(168, 85, 166, 0.15) !important; outline: none !important;}
         .col-form-label, .control-label { font-size: 13px !important; font-weight: 600 !important; color: var(--text-secondary) !important; margin-bottom: 6px !important; }
@@ -250,14 +284,13 @@
         .btn-primary { background-color: var(--brand-500) !important; border-color: var(--brand-500) !important; }
         .btn-primary:hover { background-color: var(--brand-600) !important; }
 
-        /* Settings Popup Modal */
         .formio-dialog-content { border-radius: var(--radius-lg) !important; border: 1px solid var(--border-subtle) !important; box-shadow: var(--shadow-lifted) !important; padding: 0 !important; }
         .component-settings .nav-tabs { border-bottom: 1px solid var(--border-subtle) !important; padding: 0 16px !important; background: var(--bg-canvas-subtle) !important; border-radius: var(--radius-lg) var(--radius-lg) 0 0 !important; }
         .component-settings .nav-tabs .nav-link { padding: 12px 16px !important; font-size: 13px !important; font-weight: 600 !important; color: var(--text-tertiary) !important; border: none !important; border-bottom: 2px solid transparent !important; transition: var(--transition-smooth) !important; }
         .component-settings .nav-tabs .nav-link.active { color: var(--accent-700) !important; background: transparent !important; border-bottom: 2px solid var(--accent-500) !important; }
         .component-settings .nav-tabs .nav-link:hover:not(.active) { color: var(--accent-500) !important; border-bottom: 2px solid var(--border-subtle) !important; }
 
-        /* ── Loading / Error overlay ──────────────────── */
+        /* ── Loading overlay ── */
         #overlay {
             position: fixed; inset: 0; background: rgba(250, 250, 248, 0.85); backdrop-filter: blur(4px);
             display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
@@ -267,6 +300,40 @@
         #overlay .spinner { width: 36px; height: 36px; border: 3px solid var(--border-subtle); border-top-color: var(--accent-500); border-radius: 50%; animation: spin 0.8s linear infinite; }
         #overlay .message { font-size: 14px; font-weight: 600; color: var(--text-primary); }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ========================================================================= */
+        /* FIX: DataGrid & EditGrid Choices.js Dropdown Squishing & Clipping Fix     */
+        /* ========================================================================= */
+        .formio-component-datagrid .table-responsive,
+        .formio-component-editgrid .table-responsive {
+            overflow: visible !important;
+        }
+        .formio-component-datagrid table,
+        .formio-component-datagrid td,
+        .formio-component-datagrid th,
+        .formio-component-editgrid table,
+        .formio-component-editgrid td,
+        .formio-component-editgrid th {
+            overflow: visible !important;
+        }
+        .formio-component-datagrid .form-group,
+        .formio-component-editgrid .form-group {
+            position: relative !important;
+        }
+        .formio-component-datagrid .choices__list--dropdown,
+        .formio-component-editgrid .choices__list--dropdown {
+            z-index: 99999 !important;
+            position: absolute !important;
+            min-width: 250px !important;
+            width: max-content !important;
+            white-space: nowrap !important;
+            height: auto !important;
+        }
+        .formio-component-datagrid .choices__list--dropdown .choices__list,
+        .formio-component-editgrid .choices__list--dropdown .choices__list {
+            max-height: 250px !important;
+            overflow-y: auto !important;
+        }
     </style>
 </head>
 <body>
@@ -282,10 +349,19 @@
             <i class="fas fa-arrow-left"></i> Back to Forms
         </button>
         <div class="title-wrapper">
-            <input id="form-title-input" type="text" placeholder="Untitled Form..." value=""/>
-            <div class="path-group">
-                <span>API ID:</span>
-                <input id="form-path-input" type="text" placeholder="auto-generated-id" />
+            <div class="title-inputs">
+                <input id="form-title-input" type="text" placeholder="Untitled Form..." value=""/>
+                <div class="path-group">
+                    <span>API ID:</span>
+                    <input id="form-path-input" type="text" placeholder="auto-generated-id" />
+                </div>
+            </div>
+
+            <div class="form-settings-group">
+                <label class="sql-sync-label" title="Appends the 'sql' tag to the form root when saving. Enables the SQL Save panel on Submit buttons.">
+                    <input type="checkbox" id="form-sql-checkbox" />
+                    Enable SQL Sync
+                </label>
             </div>
         </div>
     </div>
@@ -307,327 +383,730 @@
 <script src="https://cdn.jsdelivr.net/npm/formiojs@4.15.0/dist/formio.full.min.js"></script>
 
 <script>
-    (function () {
-      'use strict';
+    // This allows the Form.io components to natively check if SQL Sync is enabled
+    window.isSqlSyncEnabled = false;
+</script>
 
-      const params      = new URLSearchParams(window.location.search);
-      const jwtToken    = params.get('token');
-      const editPath    = params.get('formPath');
-      const backendBase = params.get('api') || (window.location.origin + '/api');
+<script>
+    /**
+     * form-builder-config.js Logic
+     * Contains the custom builder definitions and schema injection logic.
+     */
+    window.FormBuilderConfig = {
 
-      const FORMS_API   = backendBase + '/forms';
-      const BFF_API     = backendBase + '/formio-bff';
+        getOptions: function(SCHEMA_API) {
 
-      let builderInstance = null;
-      let currentSchema   = {};
-      let isDirty         = false;
-      let existingFormId  = null;
-      let isPathManuallyEdited = !!editPath;
-
-      const overlay      = document.getElementById('overlay');
-      const overlayMsg   = document.getElementById('overlay-message');
-      const statusBar    = document.getElementById('status-bar');
-      const statusText   = document.getElementById('status-text');
-      const titleInput   = document.getElementById('form-title-input');
-      const pathInput    = document.getElementById('form-path-input');
-      const btnSave      = document.getElementById('btn-save');
-      const saveLabel    = document.getElementById('save-label');
-      const btnCancel    = document.getElementById('btn-cancel');
-
-      function showOverlay(msg, isError = false) {
-        if (isError) overlayMsg.style.color = 'var(--status-error)';
-        overlayMsg.textContent = msg;
-        overlay.classList.remove('hidden');
-      }
-      function hideOverlay() { overlay.classList.add('hidden'); }
-      function setStatus(msg, state = 'ready') { statusBar.className = state; statusText.textContent = msg; }
-
-      function toSlug(str) {
-        return str.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
-      }
-
-      titleInput.addEventListener('input', () => {
-        if (!isPathManuallyEdited) {
-            pathInput.value = toSlug(titleInput.value);
-        }
-        markDirty();
-      });
-
-      pathInput.addEventListener('input', () => {
-        isPathManuallyEdited = true;
-        markDirty();
-      });
-
-      pathInput.addEventListener('blur', () => {
-        pathInput.value = toSlug(pathInput.value);
-      });
-
-      function markDirty() {
-          isDirty = true;
-          btnSave.disabled = !titleInput.value.trim() || !pathInput.value.trim();
-      }
-
-      async function fetchConfig() {
-        const res = await fetch(BFF_API + '/config', { headers: { 'Authorization': 'Bearer ' + jwtToken } });
-        if (!res.ok) throw new Error('Could not fetch builder config: ' + res.status);
-        return await res.json();
-      }
-
-      async function loadExistingForm(formPath) {
-        const res = await fetch(FORMS_API + '/' + formPath, {
-          headers: { 'Authorization': 'Bearer ' + jwtToken }
-        });
-        if (!res.ok) throw new Error('Form not found: ' + formPath);
-        const form = await res.json();
-        existingFormId = form._id;
-
-        titleInput.value = form.title || formPath;
-        pathInput.value  = form.path || formPath;
-        isPathManuallyEdited = true;
-
-        return form;
-      }
-
-      async function initBuilder(initialSchema) {
-        const originalFetch = Formio.fetch;
-        Formio.fetch = function(url, options) {
-          options = options || {};
-          options.headers = options.headers || {};
-          options.headers['Authorization'] = 'Bearer ' + jwtToken;
-          return originalFetch.call(this, url, options);
-        };
-
-        Formio.setUser({ _id: 'admin', data: { email: 'admin@tenant.local' } });
-        Formio.setBaseUrl(FORMS_API);
-        Formio.setProjectUrl(FORMS_API);
-
-        const container = document.getElementById('formio-builder');
-
-        const builderOptions = {
-          noDefaultSubmitButton: false,
-          builder: {
-            customDatabaseGroup: {
-              title: 'My Database Resources',
-              default: true,
-              weight: -10,
-              components: {
-
-                // =========================================================================
-                // Renamed to "Database Lookup" for clarity
-                // Added a root-level custom property "customFilterMapping" to hold our mapping array
-                // =========================================================================
-                databaseLookup: {
-                  title: 'Database Lookup',
-                  key: 'databaseLookup',
-                  icon: 'search',
-                  schema: {
-                    "label": "Database Lookup",
-                    "labelPosition": "top",
-                    "widget": "choicesjs",
-                    "type": "select",
-                    "dataSrc": "url",
-                    "properties": {
-                       "isSqlTemplate": "true",
-                       "sqlTable": "",
-                       "sqlColumn": ""
+            // =========================================================================
+            // ⚡ AUTO-FILL PANEL DEFINITION
+            // =========================================================================
+            const autoFillPanel = {
+                weight: -900,
+                type: 'panel',
+                title: '⚡ Auto-Fill from Database Lookup',
+                theme: 'info',
+                collapsible: true,
+                collapsed: true,
+                components: [
+                    {
+                        type: 'select',
+                        key: 'properties.autoFillSourceKey',
+                        label: 'Select Lookup Component',
+                        placeholder: 'Choose a Database Lookup field...',
+                        description: 'Select an existing Database Lookup field on this form.',
+                        dataSrc: 'custom',
+                        data: { custom: "values = window.FORM_SQL_COMPONENTS || [];" },
+                        valueProperty: 'value',
+                        template: '<span>{{ item.label }}</span>',
+                        input: true
                     },
-                    // This custom array will hold the mapping (Database Column -> Form Field)
-                    "customFilterMapping": [
-                       { "dbColumn": "", "formField": "" }
-                    ],
-                    "data": {
-                        "url": "",
-                        "headers": [
-                            { "key": "Authorization", "value": "Bearer YOUR_TOKEN_LOGIC_IF_NEEDED" }
-                        ]
+                    {
+                        type: 'textfield',
+                        key: 'properties.autoFillTable',
+                        label: 'Detected Source Table',
+                        description: 'Automatically detected from the component you selected above.',
+                        disabled: true,
+                        input: true,
+                        calculateValue: "var match = (window.FORM_SQL_COMPONENTS || []).find(function(c) { return c.value === data.properties.autoFillSourceKey; }); value = match ? match.table : '';",
+                        customConditional: "show = !!data.properties.autoFillSourceKey;"
                     },
-                    "valueProperty": "data",
-                    "idPath": "id",
-                    "template": "<span></span>",
-                    "filter": "",
-                    "searchEnabled": true,
-                    "authenticate": true,
-                    "input": true,
-                    "tableView": true
-                  }
-                }
-              }
-            }
-          },
-          editForm: {
-             select: [
-                {
-                   key: 'display',
-                   components: [
-                      {
-                         weight: -1000,
-                         type: 'panel',
-                         title: '⚡ Easy Database Setup',
-                         theme: 'primary',
-                         collapsible: false,
-                         customConditional: "show = !!(data.properties && data.properties.isSqlTemplate === 'true');",
-                         components: [
+                    {
+                        type: 'select',
+                        key: 'properties.autoFillColumn',
+                        label: 'Column to Extract',
+                        placeholder: 'Select column...',
+                        dataSrc: 'url',
+                        data: { url: SCHEMA_API + '/columns?table={{ data.properties.autoFillTable }}' },
+                        valueProperty: 'columnName',
+                        template: '<span>{{ item.columnName }}</span>',
+                        refreshOn: 'properties.autoFillTable',
+                        clearOnRefresh: true,
+                        input: true,
+                        customConditional: "show = !!data.properties.autoFillTable;"
+                    }
+                ]
+            };
+
+            // =========================================================================
+            // ⚙️ FLOWABLE PROCESS VARIABLE PANEL
+            // =========================================================================
+            const processVariablePanel = {
+                weight: -1050,
+                type: 'panel',
+                title: '⚙️ Process Integration',
+                theme: 'warning',
+                collapsible: true,
+                collapsed: false,
+                components: [
+                    {
+                        type: 'checkbox',
+                        key: 'properties.isProcessVariable',
+                        label: 'Inject as Process Variable',
+                        tooltip: 'If checked, the backend will capture this field and send it directly into the Flowable Workflow engine.',
+                        input: true
+                    }
+                ]
+            };
+
+            // =========================================================================
+            // ⚡ SUBMIT BUTTON SQL CONFIGURATION PANEL
+            // =========================================================================
+            const sqlSubmitConfigPanel = {
+                weight: -900,
+                type: 'panel',
+                title: '⚡ SQL Save Configuration',
+                theme: 'success',
+                collapsible: true,
+                collapsed: false,
+                customConditional: "show = data.action === 'submit' && !!window.isSqlSyncEnabled;",
+                components: [
+                    {
+                        type: 'editgrid',
+                        key: 'properties.sqlTablesConfig',
+                        label: 'SQL Tables to Update on Submit',
+                        description: 'Configure which tables should be updated when the user submits the form.',
+                        templates: {
+                            header: '<div class="row"><div class="col-sm-12"><strong>Configured Tables</strong></div></div>',
+                            row: '<div class="row"><div class="col-sm-10">{{ row.tableName }}</div><div class="col-sm-2"><div class="btn-group pull-right"><button class="btn btn-default btn-light btn-sm editRow"><i class="fa fa-edit"></i></button><button class="btn btn-danger btn-sm removeRow"><i class="fa fa-trash"></i></button></div></div></div>'
+                        },
+                        components: [
                             {
-                               type: 'textfield',
-                               key: 'properties.sqlTable',
-                               label: 'Table Name',
-                               placeholder: 'e.g., tbl_order_details',
-                               description: 'The exact name of the database table you want to fetch.',
-                               input: true,
-                               validate: { required: true }
+                                type: 'select',
+                                key: 'tableName',
+                                label: 'Target SQL Table',
+                                placeholder: 'Select a database table to save to...',
+                                dataSrc: 'url',
+                                data: { url: SCHEMA_API + '/tables' },
+                                valueProperty: 'tableName',
+                                template: '<span>{{ item.tableName }}</span>',
+                                input: true,
+                                validate: { required: true }
                             },
                             {
-                               type: 'textfield',
-                               key: 'properties.sqlColumn',
-                               label: 'Display Column Name',
-                               placeholder: 'e.g., ORDER_NO_C',
-                               description: 'The database column to display to the user in the dropdown list.',
-                               input: true,
-                               validate: { required: true }
-                            },
-                            // =========================================================================
-                            // Replaced the single input with a DataGrid to allow mandatory mapping
-                            // =========================================================================
-                            {
-                               type: 'datagrid',
-                               key: 'customFilterMapping',
-                               label: 'Filter Mapping (Required)',
-                               description: 'Map database columns to the form fields that will filter the results.',
-                               validate: { required: true, minLength: 1 },
-                               components: [
-                                  {
-                                     type: 'textfield',
-                                     key: 'dbColumn',
-                                     label: 'Database Column',
-                                     placeholder: 'e.g., ORDER_NO_C',
-                                     input: true,
-                                     validate: { required: true }
-                                  },
-                                  {
-                                     type: 'textfield',
-                                     key: 'formField',
-                                     label: 'Form Field Key',
-                                     placeholder: 'e.g., order_no_c',
-                                     input: true,
-                                     validate: { required: true }
-                                  }
-                               ]
+                                type: 'datagrid',
+                                key: 'keys',
+                                label: 'Map Form Fields to Database Columns',
+                                validate: { required: true, minLength: 1 },
+                                components: [
+                                    {
+                                        type: 'select',
+                                        key: 'dbColumn',
+                                        label: 'Target DB Column',
+                                        dataSrc: 'url',
+                                        data: { url: SCHEMA_API + '/columns?table={{ data.tableName }}' },
+                                        valueProperty: 'columnName',
+                                        template: '<span>{{ item.columnName }}</span>',
+                                        refreshOn: 'tableName',
+                                        clearOnRefresh: true,
+                                        input: true,
+                                        validate: { required: true }
+                                    },
+                                    {
+                                        type: 'textfield',
+                                        key: 'formField',
+                                        label: 'Source Form Field Key / Variable',
+                                        placeholder: 'e.g., order_no_c or select.data.id',
+                                        input: true,
+                                        validate: { required: true }
+                                    }
+                                ]
                             }
-                         ]
-                      }
-                   ]
+                        ]
+                    }
+                ]
+            };
+
+            // =========================================================================
+            // ☁️ GOOGLE DRIVE UPLOAD SETUP PANEL
+            // =========================================================================
+            const gDrivePanel = {
+                weight: -1000,
+                type: 'panel',
+                title: '⚡ Google Drive Setup',
+                theme: 'primary',
+                collapsible: false,
+                customConditional: "show = !!(data.properties && data.properties.isGDriveFile === 'true');",
+                components: [
+                    {
+                        type: 'textfield',
+                        key: 'properties.gDriveFolder',
+                        label: 'Google Drive Folder ID',
+                        placeholder: 'e.g., 10MZoqNuJ0J40-Gy7HrOC_ka...',
+                        description: 'The specific folder where this file should be stored in Google Drive.',
+                        input: true,
+                        validate: { required: true }
+                    }
+                ]
+            };
+
+            // =========================================================================
+            // EDIT FORM CONFIGURATION (TAB TARGETING)
+            // =========================================================================
+            const editFormConfig = {
+                select: [
+                    {
+                        key: 'display',
+                        components: [
+                            {
+                                weight: -1000,
+                                type: 'panel',
+                                title: '⚡ Easy Database Setup',
+                                theme: 'primary',
+                                collapsible: false,
+                                customConditional: "show = !!(data.properties && data.properties.isSqlTemplate === 'true');",
+                                components: [
+                                    {
+                                        type: 'select',
+                                        key: 'properties.sqlTable',
+                                        label: 'Table Name',
+                                        placeholder: 'Select a database table...',
+                                        dataSrc: 'url',
+                                        data: { url: SCHEMA_API + '/tables' },
+                                        valueProperty: 'tableName',
+                                        template: '<span>{{ item.tableName }}</span>',
+                                        input: true,
+                                        validate: { required: true }
+                                    },
+                                    {
+                                        type: 'select',
+                                        key: 'properties.sqlColumn',
+                                        label: 'Display Column Name',
+                                        placeholder: 'Select a column to display...',
+                                        dataSrc: 'url',
+                                        data: { url: SCHEMA_API + '/columns?table={{ data.properties.sqlTable }}' },
+                                        valueProperty: 'columnName',
+                                        template: '<span>{{ item.columnName }}</span>',
+                                        refreshOn: 'properties.sqlTable',
+                                        clearOnRefresh: true,
+                                        input: true,
+                                        validate: { required: true }
+                                    },
+                                    {
+                                        type: 'datagrid',
+                                        key: 'customFilterMapping',
+                                        label: 'Filter Mapping (Required)',
+                                        validate: { required: true, minLength: 1 },
+                                        components: [
+                                            {
+                                                type: 'select',
+                                                key: 'dbColumn',
+                                                label: 'Database Column',
+                                                dataSrc: 'url',
+                                                data: { url: SCHEMA_API + '/columns?table={{ data.properties.sqlTable }}' },
+                                                valueProperty: 'columnName',
+                                                template: '<span>{{ item.columnName }}</span>',
+                                                refreshOn: 'properties.sqlTable',
+                                                clearOnRefresh: true,
+                                                input: true,
+                                                validate: { required: true }
+                                            },
+                                            {
+                                                type: 'textfield',
+                                                key: 'formField',
+                                                label: 'Form Field Key',
+                                                input: true,
+                                                validate: { required: true }
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            // Helper to inject panels safely
+            function injectToTab(componentType, tabKey, panel) {
+                if (!editFormConfig[componentType]) editFormConfig[componentType] = [];
+                let tab = editFormConfig[componentType].find(t => t.key === tabKey);
+                if (!tab) {
+                    tab = { key: tabKey, components: [] };
+                    editFormConfig[componentType].push(tab);
                 }
-             ]
-          }
-        };
-
-        builderInstance = await Formio.builder(container, initialSchema || {}, builderOptions);
-
-        // =========================================================================
-        // Updated Magic Converter to process the Array Mapping
-        // =========================================================================
-        builderInstance.on('saveComponent', (component) => {
-          if (component.properties && component.properties.isSqlTemplate === 'true') {
-            const table = component.properties.sqlTable;
-            const column = component.properties.sqlColumn;
-            const mappings = component.customFilterMapping || [];
-
-            if (table) {
-              component.data.url = 'https://infinity-plus-services-493376716946.asia-south2.run.app/api/forms/sql-data?table=' + table;
+                tab.components.push(panel);
             }
 
-            if (column) {
-              component.template = '<span>{{ item.data.' + column + ' }}</span>';
-            }
+            // 1. Inject Auto-Fill (Data tab)
+            const autoFillCompatibleComponents = [
+                'textfield', 'number', 'currency', 'textarea', 'email', 'phoneNumber',
+                'password', 'hidden', 'datetime', 'time', 'day', 'radio', 'checkbox',
+                'selectboxes', 'select'
+            ];
+            autoFillCompatibleComponents.forEach(type => injectToTab(type, 'data', autoFillPanel));
 
-            // Loop through the DataGrid mapping array and build the chained filter string
-            if (mappings.length > 0) {
-              const filterParts = mappings
-                .filter(m => m.dbColumn && m.formField) // Ensure empty rows are ignored
-                .map(m => 'data.' + m.dbColumn + '={{data.' + m.formField + '}}');
+            // 2. Inject Process Variable (Display tab)
+            const processVarCompatibleComponents = [...autoFillCompatibleComponents, 'file'];
+            processVarCompatibleComponents.forEach(type => injectToTab(type, 'display', processVariablePanel));
 
-              component.filter = filterParts.join('&');
-            } else {
-              component.filter = '';
+            // 3. Inject Button SQL Config & GDrive Config
+            injectToTab('button', 'display', sqlSubmitConfigPanel);
+            injectToTab('file', 'display', gDrivePanel);
+
+            // =========================================================================
+            // 🔒 SAAS LOCKDOWN ROUTINE
+            // Automatically hides dangerous Raw JS fields and Custom Metadata fields
+            // across all possible Form.io components to keep the UI safe and clean.
+            // =========================================================================
+            const allFormioComponents = [
+                ...processVarCompatibleComponents, 'button', 'panel', 'fieldset',
+                'datagrid', 'editgrid', 'table', 'columns', 'well', 'signature', 'tags'
+            ];
+
+            allFormioComponents.forEach(type => {
+                if (!editFormConfig[type]) editFormConfig[type] = [];
+
+                // Hide Metadata fields from the API tab
+                injectToTab(type, 'api', { key: 'tags', ignore: true });
+                injectToTab(type, 'api', { key: 'properties', ignore: true });
+
+                // Hide Raw Javascript calculation fields from the Data tab
+                injectToTab(type, 'data', { key: 'calculateValue', ignore: true });
+                injectToTab(type, 'data', { key: 'customDefaultValue', ignore: true });
+
+                // Hide Raw Javascript fields from Validation and Conditional tabs
+                injectToTab(type, 'validation', { key: 'custom', ignore: true });
+                injectToTab(type, 'conditional', { key: 'customConditional', ignore: true });
+
+                // Hide the entire "Logic" tab (Advanced JSON/JS Logic)
+                editFormConfig[type].push({ key: 'logic', ignore: true });
+            });
+
+            // =========================================================================
+            // FINAL RETURN OBJECT
+            // =========================================================================
+            return {
+                noDefaultSubmitButton: false,
+                builder: {
+                    databaseResources: {
+                        title: 'Database Resources',
+                        default: true,
+                        weight: -10,
+                        components: {
+                            databaseLookup: {
+                                title: 'Database Lookup',
+                                key: 'databaseLookup',
+                                icon: 'search',
+                                schema: {
+                                    "label": "Database Lookup",
+                                    "labelPosition": "top",
+                                    "widget": "choicesjs",
+                                    "type": "select",
+                                    "dataSrc": "url",
+                                    "disabled": true,
+                                    "properties": {
+                                        "isSqlTemplate": "true",
+                                        "sqlTable": "",
+                                        "sqlColumn": ""
+                                    },
+                                    "customFilterMapping": [
+                                        { "dbColumn": "", "formField": "" }
+                                    ],
+                                    "data": {
+                                        "url": "",
+                                        "headers": []
+                                    },
+                                    "valueProperty": "data",
+                                    "idPath": "id",
+                                    "template": "<span></span>",
+                                    "filter": "",
+                                    "searchEnabled": true,
+                                    "authenticate": true,
+                                    "input": true,
+                                    "tableView": true
+                                }
+                            }
+                        }
+                    },
+                    storageResources: {
+                        title: 'Storage',
+                        default: true,
+                        weight: -9,
+                        components: {
+                            gdriveFile: {
+                                title: 'Google Drive File',
+                                key: 'gdriveFile',
+                                icon: 'cloud-upload',
+                                schema: {
+                                    "label": "Upload to Google Drive",
+                                    "type": "file",
+                                    "storage": "url",
+                                    "url": "https://infinity-plus-services-493376716946.asia-south2.run.app/api/storage/gdrive?folderId=",
+                                    "fileKey": "file",
+                                    "properties": {
+                                        "isGDriveFile": "true",
+                                        "gDriveFolder": ""
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                editForm: editFormConfig
+            };
+        }
+    };
+</script>
+
+
+
+<script>
+    /**
+     * form-builder-app.js Logic
+     * Main initialization and logic for the Form Builder.
+     */
+    (function () {
+        'use strict';
+
+        const params      = new URLSearchParams(window.location.search);
+        const jwtToken    = params.get('token');
+        const editPath    = params.get('formPath');
+        const backendBase = params.get('api') || (window.location.origin + '/api');
+
+        const FORMS_API   = backendBase + '/forms';
+        const BFF_API     = backendBase + '/formio-bff';
+        const SCHEMA_API  = backendBase + '/schema';
+
+        let builderInstance = null;
+        let currentSchema   = {};
+        let isDirty         = false;
+        let existingFormId  = null;
+        let isPathManuallyEdited = !!editPath;
+
+        const overlay      = document.getElementById('overlay');
+        const overlayMsg   = document.getElementById('overlay-message');
+        const statusBar    = document.getElementById('status-bar');
+        const statusText   = document.getElementById('status-text');
+        const titleInput   = document.getElementById('form-title-input');
+        const pathInput    = document.getElementById('form-path-input');
+        const btnSave      = document.getElementById('btn-save');
+        const saveLabel    = document.getElementById('save-label');
+        const btnCancel    = document.getElementById('btn-cancel');
+        const sqlSyncCheck = document.getElementById('form-sql-checkbox');
+
+        function showOverlay(msg, isError = false) {
+            if (isError) overlayMsg.style.color = 'var(--status-error)';
+            overlayMsg.textContent = msg;
+            overlay.classList.remove('hidden');
+        }
+
+        function hideOverlay() {
+            overlay.classList.add('hidden');
+        }
+
+        function setStatus(msg, state = 'ready') {
+            statusBar.className = state;
+            statusText.textContent = msg;
+        }
+
+        function toSlug(str) {
+            return str.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+        }
+
+        // -- Event Listeners for Top Bar --
+        titleInput.addEventListener('input', () => {
+            if (!isPathManuallyEdited) {
+                pathInput.value = toSlug(titleInput.value);
             }
-          }
+            markDirty();
         });
 
-        builderInstance.on('change', (schema) => { currentSchema = schema; markDirty(); });
-        hideOverlay();
-        btnSave.disabled = !titleInput.value.trim() || !pathInput.value.trim();
-      }
+        pathInput.addEventListener('input', () => {
+            isPathManuallyEdited = true;
+            markDirty();
+        });
 
-      async function saveForm() {
-        const title = titleInput.value.trim();
-        let path = pathInput.value.trim();
+        pathInput.addEventListener('blur', () => {
+            pathInput.value = toSlug(pathInput.value);
+        });
 
-        if (!title) { alert('Please enter a form title.'); return; }
-        path = toSlug(path);
-        if (!path) { alert('Form ID must contain at least one letter or number.'); return; }
-        pathInput.value = path;
+        // Track changes to the Top Bar Checkbox
+        sqlSyncCheck.addEventListener('change', (e) => {
+            window.isSqlSyncEnabled = e.target.checked;
+            markDirty();
+        });
 
-        btnSave.disabled = true; saveLabel.textContent = 'Saving…'; setStatus('Saving to database…', 'saving');
-
-        const formPayload = { ...currentSchema, title, name: path, path, type: 'form', display: currentSchema.display || 'form' };
-
-        try {
-          let res;
-          if (existingFormId) {
-            res = await fetch(FORMS_API + '/form/' + existingFormId, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwtToken },
-              body: JSON.stringify(formPayload)
-            });
-          } else {
-            res = await fetch(FORMS_API + '/form', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwtToken },
-              body: JSON.stringify(formPayload)
-            });
-          }
-
-          if (!res.ok) { const err = await res.text(); throw new Error(err); }
-          const saved = await res.json();
-          existingFormId = saved._id || existingFormId;
-          isDirty = false;
-          btnSave.disabled = false; saveLabel.textContent = 'Save Form';
-          setStatus('Saved successfully ✓', 'ready');
-
-          window.parent.postMessage({ type: 'FORMIO_FORM_SAVED', formId: saved._id, formPath: saved.path, formTitle: saved.title }, '*');
-        } catch (e) {
-          console.error('Save failed:', e);
-          btnSave.disabled = false; saveLabel.textContent = 'Save Form';
-          setStatus('Save failed', 'error');
-          alert('Failed to save form. Please check your connection.');
+        function markDirty() {
+            isDirty = true;
+            btnSave.disabled = !titleInput.value.trim() || !pathInput.value.trim();
         }
-      }
 
-      function cancel() {
-        if (isDirty && !confirm('You have unsaved changes. Are you sure you want to discard them?')) return;
-        window.parent.postMessage({ type: 'FORMIO_BUILDER_CLOSED' }, '*');
-      }
-
-      btnSave.addEventListener('click', saveForm);
-      btnCancel.addEventListener('click', cancel);
-
-      (async function boot() {
-        try {
-          if (!jwtToken) throw new Error('No authentication token provided.');
-          const config = await fetchConfig();
-
-          let initialSchema = {};
-          if (editPath) initialSchema = await loadExistingForm(editPath);
-
-          await initBuilder(initialSchema);
-        } catch (err) {
-          console.error('Builder boot failed:', err);
-          showOverlay('Failed to load: ' + err.message, true);
-          setStatus('Offline', 'error');
+        // -- API Calls --
+        async function fetchConfig() {
+            const res = await fetch(BFF_API + '/config', { headers: { 'Authorization': 'Bearer ' + jwtToken } });
+            if (!res.ok) throw new Error('Could not fetch builder config: ' + res.status);
+            return await res.json();
         }
-      })();
+
+        async function loadExistingForm(formPath) {
+            const res = await fetch(FORMS_API + '/' + formPath, {
+                headers: { 'Authorization': 'Bearer ' + jwtToken }
+            });
+            if (!res.ok) throw new Error('Form not found: ' + formPath);
+            const form = await res.json();
+            existingFormId = form._id;
+
+            titleInput.value = form.title || formPath;
+            pathInput.value  = form.path || formPath;
+            isPathManuallyEdited = true;
+
+            // NEW: Load existing SQL Sync tag status
+            if (form.tags && form.tags.includes('sql')) {
+                sqlSyncCheck.checked = true;
+                window.isSqlSyncEnabled = true;
+            }
+
+            return form;
+        }
+
+        // =========================================================================
+        // TRACKER FUNCTION: Keeps Global State of Canvas Components
+        // =========================================================================
+        function updateSqlComponentsList(schema) {
+            const sqlComps = [];
+
+            if (schema && schema.components) {
+                Formio.Utils.eachComponent(schema.components, (comp) => {
+                    // Track only Database Lookups for the Auto-Fill dropdown
+                    if (comp.properties && comp.properties.isSqlTemplate === 'true') {
+                        sqlComps.push({
+                            label: (comp.label || comp.key) + ' (' + comp.key + ')',
+                            value: comp.key,
+                            table: comp.properties.sqlTable
+                        });
+                    }
+                });
+            }
+            window.FORM_SQL_COMPONENTS = sqlComps;
+        }
+
+        // -- Core Initialization --
+        async function initBuilder(initialSchema) {
+            const originalFetch = Formio.fetch;
+            Formio.fetch = function(url, options) {
+                options = options || {};
+                options.headers = options.headers || {};
+                options.headers['Authorization'] = 'Bearer ' + jwtToken;
+                return originalFetch.call(this, url, options);
+            };
+
+            Formio.setUser({ _id: 'admin', data: { email: 'admin@tenant.local' } });
+            Formio.setBaseUrl(FORMS_API);
+            Formio.setProjectUrl(FORMS_API);
+
+            const container = document.getElementById('formio-builder');
+            const builderOptions = window.FormBuilderConfig.getOptions(SCHEMA_API);
+
+            builderInstance = await Formio.builder(container, initialSchema || {}, builderOptions);
+            updateSqlComponentsList(builderInstance.schema);
+
+            // =========================================================================
+            // THE MAGIC CONVERTER - Translates Custom UI into Form.io JSON
+            // =========================================================================
+            builderInstance.on('saveComponent', (component) => {
+
+                // --- 1. Database Lookup Processor ---
+                if (component.properties && component.properties.isSqlTemplate === 'true') {
+                    const table = component.properties.sqlTable;
+                    const column = component.properties.sqlColumn;
+                    const mappings = component.customFilterMapping || [];
+
+                    if (table) {
+                        component.data.url = 'https://infinity-plus-services-493376716946.asia-south2.run.app/api/forms/sql-data?table=' + table;
+                    }
+                    if (column) {
+                        component.template = '<span>{{ item.data.' + column + ' }}</span>';
+                    }
+                    if (mappings.length > 0) {
+                        const filterParts = mappings
+                            .filter(m => m.dbColumn && m.formField)
+                            .map(m => 'data.' + m.dbColumn + '={{data.' + m.formField + '}}');
+                        component.filter = filterParts.join('&');
+                    } else {
+                        component.filter = '';
+                    }
+                }
+
+                // --- 2. Auto-Fill Processor ---
+                if (component.properties && component.properties.autoFillSourceKey && component.properties.autoFillColumn) {
+                    const sourceKey = component.properties.autoFillSourceKey;
+                    const colName = component.properties.autoFillColumn;
+                    component.calculateValue = `value = data.${sourceKey} && data.${sourceKey}.data ? data.${sourceKey}.data.${colName} : '';`;
+                    component.allowCalculateOverride = true;
+                }
+
+                // --- 3. Process Variable Tags Handler (NEW) ---
+                component.tags = component.tags || [];
+                if (component.properties && component.properties.isProcessVariable) {
+                    if (!component.tags.includes('processVariable')) {
+                        component.tags.push('processVariable');
+                    }
+                } else {
+                    // Remove the tag if the checkbox is unchecked
+                    component.tags = component.tags.filter(t => t !== 'processVariable');
+                }
+
+                // --- 4. Submit Button SQL Config Converter (Multi-Table Array Version) ---
+                if (component.type === 'button' && component.action === 'submit') {
+                    // Only process this if the form-level checkbox is checked
+                    if (window.isSqlSyncEnabled) {
+                        const tablesConfig = component.properties.sqlTablesConfig || [];
+                        const sqlConfigObj = [];
+
+                        tablesConfig.forEach(tConf => {
+                            const table = tConf.tableName;
+                            const mappings = tConf.keys || [];
+
+                            if (table && mappings.length > 0) {
+                                const keysObj = {};
+                                mappings.forEach(m => {
+                                    if (m.dbColumn && m.formField) {
+                                        keysObj[m.dbColumn] = m.formField;
+                                    }
+                                });
+
+                                sqlConfigObj.push({
+                                    "table": table,
+                                    "keys": keysObj
+                                });
+                            }
+                        });
+
+                        if (sqlConfigObj.length > 0) {
+                            component.properties.sqlConfig = JSON.stringify(sqlConfigObj);
+                        } else {
+                            delete component.properties.sqlConfig;
+                        }
+                    } else {
+                        // If SQL Sync is off, clean up any old properties
+                        if (component.properties) delete component.properties.sqlConfig;
+                    }
+                }
+
+                // --- 5. Google Drive File Processor ---
+                if (component.type === 'file' && component.properties && component.properties.isGDriveFile === 'true') {
+                    const folder = component.properties.gDriveFolder;
+                    if (folder) {
+                        component.url = `https://infinity-plus-services-493376716946.asia-south2.run.app/api/storage/gDrive?folderId=${folder}`;
+                    }
+                }
+            });
+
+            builderInstance.on('change', (schema) => {
+                currentSchema = schema;
+                updateSqlComponentsList(schema);
+                markDirty();
+            });
+
+            hideOverlay();
+            btnSave.disabled = !titleInput.value.trim() || !pathInput.value.trim();
+        }
+
+        async function saveForm() {
+            const title = titleInput.value.trim();
+            let path = pathInput.value.trim();
+
+            if (!title) { alert('Please enter a form title.'); return; }
+            path = toSlug(path);
+            if (!path) { alert('Form ID must contain at least one letter or number.'); return; }
+            pathInput.value = path;
+
+            // =========================================================================
+            // NEW: Handle Form-Level SQL Tag Injection
+            // =========================================================================
+            currentSchema.tags = currentSchema.tags || [];
+            if (window.isSqlSyncEnabled) {
+                if (!currentSchema.tags.includes('sql')) currentSchema.tags.push('sql');
+            } else {
+                currentSchema.tags = currentSchema.tags.filter(t => t !== 'sql');
+            }
+
+            btnSave.disabled = true;
+            saveLabel.textContent = 'Saving…';
+            setStatus('Saving to database…', 'saving');
+
+            const formPayload = { ...currentSchema, title, name: path, path, type: 'form', display: currentSchema.display || 'form' };
+
+            try {
+                let res;
+                if (existingFormId) {
+                    res = await fetch(FORMS_API + '/form/' + existingFormId, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwtToken },
+                        body: JSON.stringify(formPayload)
+                    });
+                } else {
+                    res = await fetch(FORMS_API + '/form', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwtToken },
+                        body: JSON.stringify(formPayload)
+                    });
+                }
+
+                if (!res.ok) { const err = await res.text(); throw new Error(err); }
+                const saved = await res.json();
+                existingFormId = saved._id || existingFormId;
+                isDirty = false;
+                btnSave.disabled = false;
+                saveLabel.textContent = 'Save Form';
+                setStatus('Saved successfully ✓', 'ready');
+
+                window.parent.postMessage({ type: 'FORMIO_FORM_SAVED', formId: saved._id, formPath: saved.path, formTitle: saved.title }, '*');
+            } catch (e) {
+                console.error('Save failed:', e);
+                btnSave.disabled = false;
+                saveLabel.textContent = 'Save Form';
+                setStatus('Save failed', 'error');
+                alert('Failed to save form. Please check your connection.');
+            }
+        }
+
+        function cancel() {
+            if (isDirty && !confirm('You have unsaved changes. Are you sure you want to discard them?')) return;
+            window.parent.postMessage({ type: 'FORMIO_BUILDER_CLOSED' }, '*');
+        }
+
+        btnSave.addEventListener('click', saveForm);
+        btnCancel.addEventListener('click', cancel);
+
+        // -- Boot Sequence --
+        (async function boot() {
+            try {
+                if (!jwtToken) throw new Error('No authentication token provided.');
+                const config = await fetchConfig();
+
+                let initialSchema = {};
+                if (editPath) initialSchema = await loadExistingForm(editPath);
+
+                await initBuilder(initialSchema);
+            } catch (err) {
+                console.error('Builder boot failed:', err);
+                showOverlay('Failed to load: ' + err.message, true);
+                setStatus('Offline', 'error');
+            }
+        })();
 
     })();
 </script>
+
 </body>
 </html>
