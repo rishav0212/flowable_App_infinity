@@ -155,6 +155,17 @@
         }
         #form-path-input:focus { background: var(--bg-surface); border-color: var(--accent-500); box-shadow: var(--shadow-accent); }
 
+        /* API Path lock icon */
+        .path-lock {
+            margin-left: 8px;
+            color: var(--text-tertiary);
+            cursor: pointer;
+            font-size: 13px;
+            transition: var(--transition-smooth);
+        }
+        .path-lock:hover { color: var(--accent-500); }
+        .path-lock.unlinked { color: var(--status-warning); }
+
         .form-settings-group {
             margin-left: 30px;
             padding-left: 30px;
@@ -301,6 +312,21 @@
         #overlay .message { font-size: 14px; font-weight: 600; color: var(--text-primary); }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* ── Toast Notifications ── */
+        #toast-container {
+            position: fixed; bottom: 24px; left: 24px; z-index: 10000;
+            display: flex; flex-direction: column; gap: 10px; pointer-events: none;
+        }
+        .toast-msg {
+            background: var(--status-error); color: white; padding: 12px 20px;
+            border-radius: var(--radius-md); box-shadow: var(--shadow-lifted);
+            font-size: 13px; font-weight: 600; opacity: 0; transform: translateY(10px);
+            animation: slideIn 0.3s forwards, fadeOut 0.3s 4s forwards;
+            display: flex; align-items: center; gap: 8px;
+        }
+        @keyframes slideIn { to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeOut { to { opacity: 0; transform: translateY(10px); } }
+
         /* ========================================================================= */
         /* FIX: DataGrid & EditGrid Choices.js Dropdown Squishing & Clipping Fix     */
         /* ========================================================================= */
@@ -343,6 +369,8 @@
     <div class="message" id="overlay-message">Initializing workspace…</div>
 </div>
 
+<div id="toast-container"></div>
+
 <div id="toolbar">
     <div class="toolbar-left">
         <button class="btn-back" id="btn-cancel">
@@ -354,6 +382,7 @@
                 <div class="path-group">
                     <span>API ID:</span>
                     <input id="form-path-input" type="text" placeholder="auto-generated-id" />
+                    <i class="fas fa-link path-lock" id="path-lock-icon" title="API ID auto-syncs with Title. Click to lock manually."></i>
                 </div>
             </div>
 
@@ -383,8 +412,10 @@
 <script src="https://cdn.jsdelivr.net/npm/formiojs@4.15.0/dist/formio.full.min.js"></script>
 
 <script>
-    // This allows the Form.io components to natively check if SQL Sync is enabled
+    // Global States
     window.isSqlSyncEnabled = false;
+    window.FORM_SQL_COMPONENTS = [];
+    window.FORM_COMPONENTS_KEYS = [];
 </script>
 
 <script>
@@ -506,25 +537,34 @@
                                 key: 'keys',
                                 label: 'Map Form Fields to Database Columns',
                                 validate: { required: true, minLength: 1 },
+                                calculateValue: "if (value && Array.isArray(value) && row && row.tableName) { value.forEach(function(r) { r._parentTable = row.tableName; }); } return value;",
                                 components: [
+                                    {
+                                        type: 'hidden',
+                                        key: '_parentTable'
+                                    },
                                     {
                                         type: 'select',
                                         key: 'dbColumn',
                                         label: 'Target DB Column',
                                         dataSrc: 'url',
-                                        data: { url: SCHEMA_API + '/columns?table={{ data.tableName }}' },
+                                        data: { url: SCHEMA_API + '/columns?table={{ row._parentTable }}' },
                                         valueProperty: 'columnName',
                                         template: '<span>{{ item.columnName }}</span>',
-                                        refreshOn: 'tableName',
+                                        refreshOn: '_parentTable',
                                         clearOnRefresh: true,
                                         input: true,
                                         validate: { required: true }
                                     },
                                     {
-                                        type: 'textfield',
+                                        type: 'select',
                                         key: 'formField',
-                                        label: 'Source Form Field Key / Variable',
-                                        placeholder: 'e.g., order_no_c or select.data.id',
+                                        label: 'Source Form Field',
+                                        placeholder: 'Select field...',
+                                        dataSrc: 'custom',
+                                        data: { custom: "values = window.FORM_COMPONENTS_KEYS || [];" },
+                                        valueProperty: 'value',
+                                        template: '<span>{{ item.label }}</span>',
                                         input: true,
                                         validate: { required: true }
                                     }
@@ -664,8 +704,6 @@
 
             // =========================================================================
             // 🔒 SAAS LOCKDOWN ROUTINE
-            // Automatically hides dangerous Raw JS fields and Custom Metadata fields
-            // across all possible Form.io components to keep the UI safe and clean.
             // =========================================================================
             const allFormioComponents = [
                 ...processVarCompatibleComponents, 'button', 'panel', 'fieldset',
@@ -675,19 +713,12 @@
             allFormioComponents.forEach(type => {
                 if (!editFormConfig[type]) editFormConfig[type] = [];
 
-                // Hide Metadata fields from the API tab
                 injectToTab(type, 'api', { key: 'tags', ignore: true });
                 injectToTab(type, 'api', { key: 'properties', ignore: true });
-
-                // Hide Raw Javascript calculation fields from the Data tab
                 injectToTab(type, 'data', { key: 'calculateValue', ignore: true });
                 injectToTab(type, 'data', { key: 'customDefaultValue', ignore: true });
-
-                // Hide Raw Javascript fields from Validation and Conditional tabs
                 injectToTab(type, 'validation', { key: 'custom', ignore: true });
                 injectToTab(type, 'conditional', { key: 'customConditional', ignore: true });
-
-                // Hide the entire "Logic" tab (Advanced JSON/JS Logic)
                 editFormConfig[type].push({ key: 'logic', ignore: true });
             });
 
@@ -767,8 +798,6 @@
     };
 </script>
 
-
-
 <script>
     /**
      * form-builder-app.js Logic
@@ -789,6 +818,7 @@
         let builderInstance = null;
         let currentSchema   = {};
         let isDirty         = false;
+        let isInitialized   = false; // NEW: Prevents Form.io from enabling save on boot
         let existingFormId  = null;
         let isPathManuallyEdited = !!editPath;
 
@@ -798,10 +828,21 @@
         const statusText   = document.getElementById('status-text');
         const titleInput   = document.getElementById('form-title-input');
         const pathInput    = document.getElementById('form-path-input');
+        const pathLockIcon = document.getElementById('path-lock-icon');
         const btnSave      = document.getElementById('btn-save');
         const saveLabel    = document.getElementById('save-label');
         const btnCancel    = document.getElementById('btn-cancel');
         const sqlSyncCheck = document.getElementById('form-sql-checkbox');
+
+        // NEW: Toast UI Helper
+        function showToast(msg) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast-msg';
+            toast.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${msg}`;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 4500);
+        }
 
         function showOverlay(msg, isError = false) {
             if (isError) overlayMsg.style.color = 'var(--status-error)';
@@ -822,6 +863,28 @@
             return str.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
         }
 
+        // =========================================================================
+        // NEW: Sync Path Lock Icon Logic
+        // =========================================================================
+        function updatePathLockUI() {
+            if (isPathManuallyEdited) {
+                pathLockIcon.className = 'fas fa-unlink path-lock unlinked';
+                pathLockIcon.title = 'API ID is disconnected from Title. Click to re-sync.';
+            } else {
+                pathLockIcon.className = 'fas fa-link path-lock';
+                pathLockIcon.title = 'API ID auto-syncs with Title. Click to lock manually.';
+            }
+        }
+
+        pathLockIcon.addEventListener('click', () => {
+            isPathManuallyEdited = !isPathManuallyEdited;
+            if (!isPathManuallyEdited) {
+                pathInput.value = toSlug(titleInput.value);
+                markDirty();
+            }
+            updatePathLockUI();
+        });
+
         // -- Event Listeners for Top Bar --
         titleInput.addEventListener('input', () => {
             if (!isPathManuallyEdited) {
@@ -832,6 +895,7 @@
 
         pathInput.addEventListener('input', () => {
             isPathManuallyEdited = true;
+            updatePathLockUI();
             markDirty();
         });
 
@@ -839,13 +903,14 @@
             pathInput.value = toSlug(pathInput.value);
         });
 
-        // Track changes to the Top Bar Checkbox
         sqlSyncCheck.addEventListener('change', (e) => {
             window.isSqlSyncEnabled = e.target.checked;
             markDirty();
         });
 
         function markDirty() {
+            // ONLY enable save button if initialization is complete
+            if (!isInitialized) return;
             isDirty = true;
             btnSave.disabled = !titleInput.value.trim() || !pathInput.value.trim();
         }
@@ -868,8 +933,8 @@
             titleInput.value = form.title || formPath;
             pathInput.value  = form.path || formPath;
             isPathManuallyEdited = true;
+            updatePathLockUI();
 
-            // NEW: Load existing SQL Sync tag status
             if (form.tags && form.tags.includes('sql')) {
                 sqlSyncCheck.checked = true;
                 window.isSqlSyncEnabled = true;
@@ -878,15 +943,18 @@
             return form;
         }
 
-        // =========================================================================
-        // TRACKER FUNCTION: Keeps Global State of Canvas Components
-        // =========================================================================
         function updateSqlComponentsList(schema) {
             const sqlComps = [];
+            const allKeys = [];
 
             if (schema && schema.components) {
                 Formio.Utils.eachComponent(schema.components, (comp) => {
-                    // Track only Database Lookups for the Auto-Fill dropdown
+                    if (comp.key && comp.type !== 'button') {
+                        allKeys.push({
+                            label: (comp.label || comp.key) + ' (' + comp.key + ')',
+                            value: comp.key
+                        });
+                    }
                     if (comp.properties && comp.properties.isSqlTemplate === 'true') {
                         sqlComps.push({
                             label: (comp.label || comp.key) + ' (' + comp.key + ')',
@@ -897,16 +965,32 @@
                 });
             }
             window.FORM_SQL_COMPONENTS = sqlComps;
+            window.FORM_COMPONENTS_KEYS = allKeys;
         }
 
         // -- Core Initialization --
         async function initBuilder(initialSchema) {
             const originalFetch = Formio.fetch;
-            Formio.fetch = function(url, options) {
+
+            // =========================================================================
+            // NEW: Global HTTP Interceptor for Error Handling
+            // =========================================================================
+            Formio.fetch = async function(url, options) {
                 options = options || {};
                 options.headers = options.headers || {};
                 options.headers['Authorization'] = 'Bearer ' + jwtToken;
-                return originalFetch.call(this, url, options);
+                try {
+                    const response = await originalFetch.call(this, url, options);
+                    if (!response.ok && url.includes(SCHEMA_API)) {
+                        showToast('Database Error: Could not fetch schema data.');
+                    }
+                    return response;
+                } catch (err) {
+                    if (url.includes(SCHEMA_API)) {
+                        showToast('Network Error: Database schema API is unreachable.');
+                    }
+                    throw err;
+                }
             };
 
             Formio.setUser({ _id: 'admin', data: { email: 'admin@tenant.local' } });
@@ -919,23 +1003,13 @@
             builderInstance = await Formio.builder(container, initialSchema || {}, builderOptions);
             updateSqlComponentsList(builderInstance.schema);
 
-            // =========================================================================
-            // THE MAGIC CONVERTER - Translates Custom UI into Form.io JSON
-            // =========================================================================
             builderInstance.on('saveComponent', (component) => {
-
-                // --- 1. Database Lookup Processor ---
                 if (component.properties && component.properties.isSqlTemplate === 'true') {
                     const table = component.properties.sqlTable;
                     const column = component.properties.sqlColumn;
                     const mappings = component.customFilterMapping || [];
-
-                    if (table) {
-                        component.data.url = 'https://infinity-plus-services-493376716946.asia-south2.run.app/api/forms/sql-data?table=' + table;
-                    }
-                    if (column) {
-                        component.template = '<span>{{ item.data.' + column + ' }}</span>';
-                    }
+                    if (table) component.data.url = 'https://infinity-plus-services-493376716946.asia-south2.run.app/api/forms/sql-data?table=' + table;
+                    if (column) component.template = '<span>{{ item.data.' + column + ' }}</span>';
                     if (mappings.length > 0) {
                         const filterParts = mappings
                             .filter(m => m.dbColumn && m.formField)
@@ -946,7 +1020,6 @@
                     }
                 }
 
-                // --- 2. Auto-Fill Processor ---
                 if (component.properties && component.properties.autoFillSourceKey && component.properties.autoFillColumn) {
                     const sourceKey = component.properties.autoFillSourceKey;
                     const colName = component.properties.autoFillColumn;
@@ -954,55 +1027,40 @@
                     component.allowCalculateOverride = true;
                 }
 
-                // --- 3. Process Variable Tags Handler (NEW) ---
                 component.tags = component.tags || [];
                 if (component.properties && component.properties.isProcessVariable) {
-                    if (!component.tags.includes('processVariable')) {
-                        component.tags.push('processVariable');
-                    }
+                    if (!component.tags.includes('processVariable')) component.tags.push('processVariable');
                 } else {
-                    // Remove the tag if the checkbox is unchecked
                     component.tags = component.tags.filter(t => t !== 'processVariable');
                 }
 
-                // --- 4. Submit Button SQL Config Converter (Multi-Table Array Version) ---
                 if (component.type === 'button' && component.action === 'submit') {
-                    // Only process this if the form-level checkbox is checked
                     if (window.isSqlSyncEnabled) {
                         const tablesConfig = component.properties.sqlTablesConfig || [];
                         const sqlConfigObj = [];
-
                         tablesConfig.forEach(tConf => {
                             const table = tConf.tableName;
                             const mappings = tConf.keys || [];
-
                             if (table && mappings.length > 0) {
                                 const keysObj = {};
                                 mappings.forEach(m => {
-                                    if (m.dbColumn && m.formField) {
+                                    if (m.dbColumn && m.formField && m.dbColumn !== '_parentTable') {
                                         keysObj[m.dbColumn] = m.formField;
                                     }
                                 });
-
-                                sqlConfigObj.push({
-                                    "table": table,
-                                    "keys": keysObj
-                                });
+                                sqlConfigObj.push({ "table": table, "keys": keysObj });
                             }
                         });
-
                         if (sqlConfigObj.length > 0) {
                             component.properties.sqlConfig = JSON.stringify(sqlConfigObj);
                         } else {
                             delete component.properties.sqlConfig;
                         }
                     } else {
-                        // If SQL Sync is off, clean up any old properties
                         if (component.properties) delete component.properties.sqlConfig;
                     }
                 }
 
-                // --- 5. Google Drive File Processor ---
                 if (component.type === 'file' && component.properties && component.properties.isGDriveFile === 'true') {
                     const folder = component.properties.gDriveFolder;
                     if (folder) {
@@ -1018,7 +1076,15 @@
             });
 
             hideOverlay();
-            btnSave.disabled = !titleInput.value.trim() || !pathInput.value.trim();
+
+            // =========================================================================
+            // NEW: Prevent Save Button active state on load
+            // =========================================================================
+            setTimeout(() => {
+                isInitialized = true;
+                isDirty = false;
+                btnSave.disabled = true;
+            }, 500);
         }
 
         async function saveForm() {
@@ -1030,9 +1096,6 @@
             if (!path) { alert('Form ID must contain at least one letter or number.'); return; }
             pathInput.value = path;
 
-            // =========================================================================
-            // NEW: Handle Form-Level SQL Tag Injection
-            // =========================================================================
             currentSchema.tags = currentSchema.tags || [];
             if (window.isSqlSyncEnabled) {
                 if (!currentSchema.tags.includes('sql')) currentSchema.tags.push('sql');
@@ -1066,7 +1129,7 @@
                 const saved = await res.json();
                 existingFormId = saved._id || existingFormId;
                 isDirty = false;
-                btnSave.disabled = false;
+                btnSave.disabled = true; // Stay disabled until next edit
                 saveLabel.textContent = 'Save Form';
                 setStatus('Saved successfully ✓', 'ready');
 
@@ -1076,7 +1139,7 @@
                 btnSave.disabled = false;
                 saveLabel.textContent = 'Save Form';
                 setStatus('Save failed', 'error');
-                alert('Failed to save form. Please check your connection.');
+                showToast('Failed to save form. Check your network.');
             }
         }
 
@@ -1092,6 +1155,10 @@
         (async function boot() {
             try {
                 if (!jwtToken) throw new Error('No authentication token provided.');
+
+                // Initialize the lock icon UI
+                updatePathLockUI();
+
                 const config = await fetchConfig();
 
                 let initialSchema = {};
