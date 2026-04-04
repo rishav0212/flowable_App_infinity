@@ -139,6 +139,7 @@ public class UserManagementService {
             }
         }
     }
+
     /**
      * Allows tenants or admins to define completely custom actions for an existing resource dynamically.
      */
@@ -214,5 +215,101 @@ public class UserManagementService {
                 .where(field("user_id").eq(targetUserId))
                 .and(field("role_id").eq(roleId))
                 .execute();
+    }
+
+    // --- DELETIONS ---
+
+    @Transactional
+    public void deleteUser(String userId, String schema) {
+        // Remove role mappings first
+        dsl.deleteFrom(table(name(schema, "tbl_user_roles")))
+                .where(field("user_id").eq(userId))
+                .execute();
+        // Delete user
+        dsl.deleteFrom(table(name(schema, "tbl_users")))
+                .where(field("user_id").eq(userId))
+                .execute();
+    }
+
+    @Transactional
+    public void deleteRole(String roleId, String schema) {
+        // Remove role mappings
+        dsl.deleteFrom(table(name(schema, "tbl_user_roles")))
+                .where(field("role_id").eq(roleId))
+                .execute();
+        // Delete role
+        dsl.deleteFrom(table(name(schema, "tbl_roles")))
+                .where(field("role_id").eq(roleId))
+                .execute();
+    }
+
+    @Transactional
+    public void deleteResource(String resourceKey, String schema) {
+        // Remove actions
+        dsl.deleteFrom(table(name(schema, "tbl_resource_actions")))
+                .where(field("resource_key").eq(resourceKey))
+                .execute();
+        // Delete resource
+        dsl.deleteFrom(table(name(schema, "tbl_resources")))
+                .where(field("resource_key").eq(resourceKey))
+                .execute();
+    }
+
+    // =====================================================================================
+    // UPDATES
+    // =====================================================================================
+
+    @Transactional
+    public void updateUser(String userId, Map<String, Object> payload, String schema) {
+        Map<org.jooq.Field<?>, Object> updates = new java.util.HashMap<>();
+
+        // Map frontend JSON keys to database columns
+        if (payload.containsKey("email")) {
+            updates.put(field("email"), payload.get("email"));
+        }
+        if (payload.containsKey("firstName")) {
+            updates.put(field("first_name"), payload.get("firstName"));
+        }
+        if (payload.containsKey("lastName")) {
+            updates.put(field("last_name"), payload.get("lastName"));
+        }
+        if (payload.containsKey("isActive")) {
+            updates.put(field("is_active"), payload.get("isActive"));
+        }
+        // If you are storing metadata as JSONB, handle it here
+        if (payload.containsKey("metadata")) {
+            // Note: Depending on your jOOQ setup, you might need to cast this to JSONB
+            // updates.put(field("metadata"), JSONB.valueOf(new ObjectMapper().writeValueAsString(payload.get("metadata"))));
+            updates.put(field("metadata"), payload.get("metadata"));
+        }
+
+        // Only execute update if there's actually something to change
+        if (!updates.isEmpty()) {
+            dsl.update(table(name(schema, "tbl_users")))
+                    .set(updates)
+                    .where(field("user_id").eq(userId))
+                    .execute();
+        }
+    }
+
+    @Transactional
+    public void updateRole(String roleId, Map<String, Object> payload, String schema) {
+        Map<org.jooq.Field<?>, Object> updates = new java.util.HashMap<>();
+
+        // Map frontend JSON keys to database columns
+        if (payload.containsKey("roleName")) {
+            updates.put(field("role_name"), payload.get("roleName"));
+        }
+        if (payload.containsKey("description")) {
+            updates.put(field("description"), payload.get("description"));
+        }
+
+        // Only execute update if there's actually something to change
+        if (!updates.isEmpty()) {
+            dsl.update(table(name(schema, "tbl_roles")))
+                    .set(updates)
+                    .where(field("role_id").eq(roleId))
+                    .execute();
+        }
     }
 }

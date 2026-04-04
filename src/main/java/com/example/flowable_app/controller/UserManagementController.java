@@ -110,9 +110,16 @@ public class UserManagementController {
 
     @PostMapping("/roles/{roleId}/inherits/{inheritsRoleId}")
     public ResponseEntity<?> addRoleInheritance(@PathVariable String roleId, @PathVariable String inheritsRoleId) {
-        casbinService.addRoleInheritance(roleId, inheritsRoleId,
-                userContextService.getCurrentTenantId(),
-                userContextService.getCurrentTenantSchema());
+        String schema = userContextService.getCurrentTenantSchema();
+        String tenantId = userContextService.getCurrentTenantId();
+
+        // 🛡️ CYCLICAL DEPENDENCY GUARD
+        if (casbinService.causesCycle(roleId, inheritsRoleId, tenantId, schema)) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("message", "Circular dependency detected. This would create an infinite loop."));
+        }
+
+        casbinService.addRoleInheritance(roleId, inheritsRoleId, tenantId, schema);
         return ResponseEntity.ok(Map.of("message", "Role inheritance added successfully"));
     }
 
@@ -202,5 +209,85 @@ public class UserManagementController {
         );
 
         return ResponseEntity.ok(Map.of("message", "Permission revoked"));
+    }
+
+    // === NEW DELETION APIS ===
+
+    @DeleteMapping("/users/{userId}")
+    public ResponseEntity<?> deleteUser(@PathVariable String userId) {
+        userMgmtService.deleteUser(userId, userContextService.getCurrentTenantSchema());
+        // (Optional: You could also wipe Casbin user groupings here)
+        return ResponseEntity.ok(Map.of("message", "User deleted successfully"));
+    }
+
+    @DeleteMapping("/roles/{roleId}")
+    public ResponseEntity<?> deleteRole(@PathVariable String roleId) {
+        String schema = userContextService.getCurrentTenantSchema();
+        String tenantId = userContextService.getCurrentTenantId();
+
+        userMgmtService.deleteRole(roleId, schema);
+        casbinService.removeRoleCompletely(roleId, tenantId, schema);
+
+        return ResponseEntity.ok(Map.of("message", "Role deleted successfully"));
+    }
+
+    @DeleteMapping("/resources/{resourceKey}")
+    public ResponseEntity<?> deleteResource(@PathVariable String resourceKey) {
+        String schema = userContextService.getCurrentTenantSchema();
+        String tenantId = userContextService.getCurrentTenantId();
+
+        userMgmtService.deleteResource(resourceKey, schema);
+        casbinService.removePoliciesByResource(resourceKey, tenantId, schema);
+
+        return ResponseEntity.ok(Map.of("message", "Resource deleted successfully"));
+    }
+
+// === NEW UPDATE APIS ===
+
+    @PutMapping("/users/{userId}")
+    public ResponseEntity<?> updateUser(@PathVariable String userId, @RequestBody Map<String, Object> payload) {
+        String schema = userContextService.getCurrentTenantSchema();
+        // Assuming your userMgmtService has an updateUser method.
+        // If not, create a simple jOOQ update query similar to your create query.
+        userMgmtService.updateUser(userId, payload, schema);
+        return ResponseEntity.ok(Map.of("message", "User updated successfully"));
+    }
+
+    @PutMapping("/roles/{roleId}")
+    public ResponseEntity<?> updateRole(@PathVariable String roleId, @RequestBody Map<String, Object> payload) {
+        String schema = userContextService.getCurrentTenantSchema();
+        userMgmtService.updateRole(roleId, payload, schema);
+        return ResponseEntity.ok(Map.of("message", "Role updated successfully"));
+    }
+// === NEW EFFECTIVE ACCESS API (Replaces frontend loops) ===
+
+    @GetMapping("/users/{userId}/effective-access")
+    public ResponseEntity<?> getEffectiveAccess(@PathVariable String userId) {
+        String schema = userContextService.getCurrentTenantSchema();
+        String tenantId = userContextService.getCurrentTenantId();
+
+        // 1. Get exact direct roles from the relational DB (Absolute Source of Truth)
+        List<String> directRoles = userMgmtService.getUserRoles(userId, schema);
+
+        // 2. Resolve all inherited roles using Casbin's graph
+        java.util.Set<String> effectiveRolesSet = new java.util.HashSet<>(directRoles);
+
+        for (String role : directRoles) {
+            // Casbin treats users and roles interchangeably in the graph.
+            // Here we ask Casbin: "What roles does this specific role inherit?"
+            List<String> inherited = casbinService.getImplicitRolesForUser(role, tenantId, schema);
+            effectiveRolesSet.addAll(inherited);
+        }
+
+        List<String> effectiveRoles = new java.util.ArrayList<>(effectiveRolesSet);
+
+        // 3. Fetch all policies (permissions) for these combined effective roles
+        List<List<String>> policies = casbinService.getPoliciesForRoles(effectiveRoles, tenantId, schema);
+
+        return ResponseEntity.ok(Map.of(
+                "roles", directRoles,
+                "effectiveRoles", effectiveRoles,
+                "policies", policies
+        ));
     }
 }

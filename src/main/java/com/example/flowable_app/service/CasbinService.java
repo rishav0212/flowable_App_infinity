@@ -93,4 +93,53 @@ public class CasbinService {
     public List<String> getInheritedRoles(String roleId, String tenantId, String schemaName) {
         return casbinConfig.getEnforcer(schemaName).getRolesForUserInDomain(roleId, tenantId);
     }
+
+    // =====================================================================================
+    // 7. ADVANCED EFFECTIVE ACCESS & CYCLE GUARDS
+    // =====================================================================================
+
+    // Cycle Guard: Checks if making 'roleId' inherit 'inheritsRoleId' creates a loop
+    public boolean causesCycle(String roleId, String inheritsRoleId, String tenantId, String schemaName) {
+        if (roleId.equals(inheritsRoleId)) return true;
+
+        // Casbin's getImplicitRolesForUser gets all roles inherited UP the tree.
+        // If we want 'roleId' to inherit 'inheritsRoleId', we must ensure 'roleId'
+        // is NOT already inside the implicit roles of 'inheritsRoleId'
+        List<String> implicitRolesOfTarget = casbinConfig.getEnforcer(schemaName)
+                .getImplicitRolesForUser(inheritsRoleId, tenantId);
+        return implicitRolesOfTarget.contains(roleId);
+    }
+
+    // Get all roles a user has natively via Casbin (direct + inherited)
+    public List<String> getImplicitRolesForUser(String userId, String tenantId, String schemaName) {
+        return casbinConfig.getEnforcer(schemaName).getImplicitRolesForUser(userId, tenantId);
+    }
+
+    // Fetch policies for a batch of roles efficiently
+    public List<List<String>> getPoliciesForRoles(List<String> roles, String tenantId, String schemaName) {
+        List<List<String>> allPolicies = new java.util.ArrayList<>();
+        Enforcer enforcer = casbinConfig.getEnforcer(schemaName);
+        for (String role : roles) {
+            allPolicies.addAll(enforcer.getFilteredPolicy(0, role, tenantId));
+        }
+        return allPolicies;
+    }
+
+    // =====================================================================================
+    // 8. DELETION CLEANUP
+    // =====================================================================================
+
+    public void removePoliciesByResource(String resourceKey, String tenantId, String schemaName) {
+        // Removes all 'p' rules where tenantId is index 1 and resourceKey is index 2
+        casbinConfig.getEnforcer(schemaName).removeFilteredPolicy(1, tenantId, resourceKey);
+    }
+
+    public void removeRoleCompletely(String roleId, String tenantId, String schemaName) {
+        Enforcer enforcer = casbinConfig.getEnforcer(schemaName);
+        // Remove direct permission policies assigned to this role
+        enforcer.removeFilteredPolicy(0, roleId, tenantId);
+        // Remove inheritance mapping where this role is the child (index 0) or parent (index 1)
+        enforcer.removeFilteredGroupingPolicy(0, roleId);
+        enforcer.removeFilteredGroupingPolicy(1, roleId);
+    }
 }
