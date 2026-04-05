@@ -69,40 +69,41 @@ public class UserManagementService {
     }
 
     public List<Map<String, Object>> getAllUsers(String schema) {
-        /*
-         * OPTIMIZATION: We are using jOOQ's 'multiset' feature to aggregate the user's roles
-         * directly within the database query. This resolves the N+1 query problem by fetching
-         * all users and their associated roles in a single database round-trip, rather than
-         * executing a separate query for every single user in the application layer.
-         * We alias the tables as 'u' and 'ur' to perform a clean internal JOIN via the multiset subquery.
-         */
         return dsl.select(
-                        field("u.*"),
+                        field(name("u", "user_id")).as("user_id"),
+                        field(name("u", "email")).as("email"),
+                        field(name("u", "first_name")).as("first_name"),
+                        field(name("u", "last_name")).as("last_name"),
+                        field(name("u", "is_active")).as("is_active"),
+                        field(name("u", "metadata")).as("metadata"),
+                        field(name("u", "created_ts")).as("created_ts"),
                         multiset(
-                                select(field("ur.role_id"))
+                                select(field(name("ur", "role_id")))
                                         .from(table(name(schema, "tbl_user_roles")).as("ur"))
-                                        .where(field("ur.user_id").eq(field("u.user_id")))
+                                        // 🛡️ THE FIX: Explicitly compare the subquery 'ur' user_id to the outer 'u' user_id
+                                        .where(field(name("ur", "user_id")).eq(field(name("u", "user_id"))))
                         ).as("roles").convertFrom(r -> r.map(rec -> rec.get(0, String.class)))
                 )
                 .from(table(name(schema, "tbl_users")).as("u"))
-                .orderBy(field("u.created_ts").desc())
+                .orderBy(field(name("u", "created_ts")).desc())
                 .fetch()
                 .map(record -> {
                     Map<String, Object> map = record.intoMap();
                     Object metadata = map.get("metadata");
 
-                    // 🛡️ THE FIX: Unwrap jOOQ's JSONB and parse it back to a standard Map
+                    // 🛡️ Unwrap jOOQ's JSONB safely
                     if (metadata instanceof org.jooq.JSONB jsonb) {
                         try {
                             map.put("metadata", objectMapper.readValue(jsonb.data(), Map.class));
                         } catch (Exception e) {
-                            map.put("metadata", Map.of()); // Fallback to empty map on parse error
+                            map.put("metadata", Map.of());
                         }
+                    } else if (metadata == null) {
+                        map.put("metadata", Map.of());
                     }
                     return map;
                 });
     }
-
     // --- ROLES & RESOURCES ---
 
     public void createRole(String roleId, String roleName, String description, String schema, String adminUserId) {
@@ -269,7 +270,6 @@ public class UserManagementService {
                 .where(field("resource_key").eq(resourceKey))
                 .execute();
     }
-
 
 
     // =====================================================================================
