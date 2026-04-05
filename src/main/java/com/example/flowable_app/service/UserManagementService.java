@@ -69,8 +69,23 @@ public class UserManagementService {
     }
 
     public List<Map<String, Object>> getAllUsers(String schema) {
-        return dsl.selectFrom(table(name(schema, "tbl_users")))
-                .orderBy(field("created_ts").desc())
+        /*
+         * OPTIMIZATION: We are using jOOQ's 'multiset' feature to aggregate the user's roles
+         * directly within the database query. This resolves the N+1 query problem by fetching
+         * all users and their associated roles in a single database round-trip, rather than
+         * executing a separate query for every single user in the application layer.
+         * We alias the tables as 'u' and 'ur' to perform a clean internal JOIN via the multiset subquery.
+         */
+        return dsl.select(
+                        field("u.*"),
+                        multiset(
+                                select(field("ur.role_id"))
+                                        .from(table(name(schema, "tbl_user_roles")).as("ur"))
+                                        .where(field("ur.user_id").eq(field("u.user_id")))
+                        ).as("roles").convertFrom(r -> r.map(rec -> rec.get(0, String.class)))
+                )
+                .from(table(name(schema, "tbl_users")).as("u"))
+                .orderBy(field("u.created_ts").desc())
                 .fetch()
                 .map(record -> {
                     Map<String, Object> map = record.intoMap();
@@ -255,15 +270,16 @@ public class UserManagementService {
                 .execute();
     }
 
+
+
     // =====================================================================================
-    // UPDATES
+    // UPDATE METHODS
     // =====================================================================================
 
     @Transactional
     public void updateUser(String userId, Map<String, Object> payload, String schema) {
         Map<org.jooq.Field<?>, Object> updates = new java.util.HashMap<>();
 
-        // Map frontend JSON keys to database columns
         if (payload.containsKey("email")) {
             updates.put(field("email"), payload.get("email"));
         }
@@ -276,14 +292,7 @@ public class UserManagementService {
         if (payload.containsKey("isActive")) {
             updates.put(field("is_active"), payload.get("isActive"));
         }
-        // If you are storing metadata as JSONB, handle it here
-        if (payload.containsKey("metadata")) {
-            // Note: Depending on your jOOQ setup, you might need to cast this to JSONB
-            // updates.put(field("metadata"), JSONB.valueOf(new ObjectMapper().writeValueAsString(payload.get("metadata"))));
-            updates.put(field("metadata"), payload.get("metadata"));
-        }
 
-        // Only execute update if there's actually something to change
         if (!updates.isEmpty()) {
             dsl.update(table(name(schema, "tbl_users")))
                     .set(updates)
@@ -296,7 +305,6 @@ public class UserManagementService {
     public void updateRole(String roleId, Map<String, Object> payload, String schema) {
         Map<org.jooq.Field<?>, Object> updates = new java.util.HashMap<>();
 
-        // Map frontend JSON keys to database columns
         if (payload.containsKey("roleName")) {
             updates.put(field("role_name"), payload.get("roleName"));
         }
@@ -304,7 +312,6 @@ public class UserManagementService {
             updates.put(field("description"), payload.get("description"));
         }
 
-        // Only execute update if there's actually something to change
         if (!updates.isEmpty()) {
             dsl.update(table(name(schema, "tbl_roles")))
                     .set(updates)

@@ -253,6 +253,14 @@ public class UserManagementController {
         return ResponseEntity.ok(Map.of("message", "User updated successfully"));
     }
 
+    @PutMapping("/users/{userId}/reactivate")
+    public ResponseEntity<?> reactivateUser(@PathVariable String userId) {
+        String schema = userContextService.getCurrentTenantSchema();
+        // Just updates is_active to true in the DB
+        userMgmtService.updateUser(userId, Map.of("isActive", true), schema);
+        return ResponseEntity.ok(Map.of("message", "User reactivated successfully"));
+    }
+
     @PutMapping("/roles/{roleId}")
     public ResponseEntity<?> updateRole(@PathVariable String roleId, @RequestBody Map<String, Object> payload) {
         String schema = userContextService.getCurrentTenantSchema();
