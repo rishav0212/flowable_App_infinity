@@ -1,5 +1,6 @@
 package com.example.flowable_app.controller;
 
+import jakarta.annotation.PreDestroy;
 import org.flowable.engine.HistoryService;
 import org.flowable.engine.history.HistoricProcessInstance;
 import org.flowable.variable.api.history.HistoricVariableInstance;
@@ -8,7 +9,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 
-import jakarta.annotation.PreDestroy; // Use javax.annotation.PreDestroy if on older Spring/Java EE
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -20,7 +20,11 @@ import java.util.stream.Collectors;
 public class ToolJetDynamicBulkController {
 
     private final HistoryService historyService;
-    private final RestTemplate restTemplate;
+
+    // Initialize directly to avoid Spring Boot UnsatisfiedDependencyException.
+    // By creating it here with 'new', we bypass Spring's dependency injection which was failing
+    // because no global RestTemplate @Bean was configured in the application.
+    private final RestTemplate restTemplate = new RestTemplate();
 
     // 🚀 DEDICATED THREAD POOL: Processes 50 tasks at the exact same time without crashing Tomcat
     private final ExecutorService executorService = Executors.newFixedThreadPool(50);
@@ -28,9 +32,9 @@ public class ToolJetDynamicBulkController {
     @Value("${app.backend.url:http://localhost:8080}")
     private String backendUrl;
 
-    public ToolJetDynamicBulkController(HistoryService historyService, RestTemplate restTemplate) {
+    // Removed RestTemplate from the constructor parameters to fix the startup crash.
+    public ToolJetDynamicBulkController(HistoryService historyService) {
         this.historyService = historyService;
-        this.restTemplate = restTemplate;
     }
 
     // Gracefully shut down the thread pool when the application stops
@@ -104,7 +108,8 @@ public class ToolJetDynamicBulkController {
 
                 if ("action".equals(name) && val != null) actionTaken = val.toString();
                 else if ("formSubmissionId".equals(name) && submissionId == null) submissionId = (String) val;
-                else if (("submittedFormKey".equals(name) || "formKey".equals(name)) && formKey == null) formKey = (String) val;
+                else if (("submittedFormKey".equals(name) || "formKey".equals(name)) && formKey == null)
+                    formKey = (String) val;
             }
 
             response.put("ACTION_TAKEN", actionTaken);
