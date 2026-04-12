@@ -1,4 +1,4 @@
-package com.example.flowable_app.config;
+package com.example.flowable_app.core.security.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

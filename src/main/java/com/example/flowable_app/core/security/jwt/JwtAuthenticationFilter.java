@@ -1,4 +1,4 @@
-package com.example.flowable_app.config;
+package com.example.flowable_app.core.security.jwt;
 
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;

@@ -1,4 +1,4 @@
-package com.example.flowable_app.service;
+package com.example.flowable_app.core.security;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;

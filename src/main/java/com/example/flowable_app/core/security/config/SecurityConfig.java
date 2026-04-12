@@ -1,5 +1,8 @@
-package com.example.flowable_app.config;
+package com.example.flowable_app.core.security.config;
 
+import com.example.flowable_app.core.security.jwt.JwtAuthenticationFilter;
+import com.example.flowable_app.core.security.oauth2.CustomOAuth2UserService;
+import com.example.flowable_app.core.security.oauth2.OAuth2LoginSuccessHandler;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;

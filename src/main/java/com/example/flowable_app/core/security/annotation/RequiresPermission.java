@@ -1,4 +1,4 @@
-package com.example.flowable_app.config;
+package com.example.flowable_app.core.security.annotation;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

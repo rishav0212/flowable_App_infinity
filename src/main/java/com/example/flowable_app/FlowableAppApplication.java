@@ -1,6 +1,6 @@
 package com.example.flowable_app;
 
-import com.example.flowable_app.config.FlowableEndpointSecurityInterceptor;
+import com.example.flowable_app.core.security.tenant.FlowableEndpointSecurityInterceptor;
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
 import io.swagger.v3.oas.annotations.info.Info;

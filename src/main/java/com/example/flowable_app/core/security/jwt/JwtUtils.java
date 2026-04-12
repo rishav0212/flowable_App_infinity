@@ -1,4 +1,4 @@
-package com.example.flowable_app.config; // <--- Note the package is 'config'
+package com.example.flowable_app.core.security.jwt; // <--- Note the package is 'config'
 
 
 import io.jsonwebtoken.Claims;

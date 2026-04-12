@@ -1,4 +1,4 @@
-package com.example.flowable_app.config;
+package com.example.flowable_app.core.security.config;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

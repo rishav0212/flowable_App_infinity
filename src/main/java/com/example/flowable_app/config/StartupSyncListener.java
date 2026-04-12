@@ -1,6 +1,6 @@
 package com.example.flowable_app.config;
 
-import com.example.flowable_app.service.SystemResourceSyncService;
+import com.example.flowable_app.features.iam.service.SystemResourceSyncService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;

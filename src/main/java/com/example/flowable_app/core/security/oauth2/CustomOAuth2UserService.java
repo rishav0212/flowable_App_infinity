@@ -1,8 +1,8 @@
-package com.example.flowable_app.config;
+package com.example.flowable_app.core.security.oauth2;
 
 import com.example.flowable_app.entity.Tenant;
 import com.example.flowable_app.repository.TenantRepository;
-import com.example.flowable_app.service.AllowedUserService;
+import com.example.flowable_app.features.iam.service.AllowedUserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;

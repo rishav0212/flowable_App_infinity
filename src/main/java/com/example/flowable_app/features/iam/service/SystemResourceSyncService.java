@@ -1,8 +1,8 @@
-package com.example.flowable_app.service;
+package com.example.flowable_app.features.iam.service;
 
 import com.example.flowable_app.entity.Tenant;
 import com.example.flowable_app.repository.TenantRepository;
-import com.example.flowable_app.config.SystemCasbinResourceConfig;
+import com.example.flowable_app.core.security.config.SystemCasbinResourceConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jooq.DSLContext;
@@ -12,6 +12,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import static org.jooq.impl.DSL.*;
 
+
+/**
+ * Startup utility service responsible for syncing the system-resources.yml definitions
+ * into the database for all active tenants. Ensures critical system resources are always available.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

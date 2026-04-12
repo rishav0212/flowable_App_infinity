@@ -1,7 +1,7 @@
-package com.example.flowable_app.config;
+package com.example.flowable_app.core.security.annotation;
 
-import com.example.flowable_app.service.CasbinService;
-import com.example.flowable_app.service.UserContextService;
+import com.example.flowable_app.features.iam.service.CasbinService;
+import com.example.flowable_app.core.security.UserContextService;
 import lombok.RequiredArgsConstructor;
 import org.aspectj.lang.JoinPoint;
 import org.aspectj.lang.annotation.Aspect;

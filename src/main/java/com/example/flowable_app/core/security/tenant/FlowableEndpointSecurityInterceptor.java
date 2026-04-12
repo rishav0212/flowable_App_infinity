@@ -1,4 +1,4 @@
-package com.example.flowable_app.config;
+package com.example.flowable_app.core.security.tenant;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;

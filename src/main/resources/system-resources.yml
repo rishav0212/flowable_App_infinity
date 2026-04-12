@@ -11,3 +11,57 @@ system:
           description: "Basic capability to view the instance list."
         - name: "delete_instance"
           description: "DANGEROUS: Grants the ability to permanently terminate or delete running process instances."
+
+
+    # --- WORKFLOW EXPLORER ---
+    - key: "module:admin_workflows"
+      type: "page"
+      displayName: "Workflow Explorer"
+      description: "Manage BPMN process definitions and new deployments."
+      actions:
+        - name: "view"
+          description: "Can view BPMN diagrams and XML source code."
+        - name: "deploy"
+          description: "Can deploy new versions of a process."
+        - name: "delete"
+          description: "Can delete a process deployment."
+
+    # --- FORM MANAGER ---
+    - key: "module:admin_forms"
+      type: "page"
+      displayName: "Form Manager"
+      description: "Create and edit Form.io forms used in user tasks."
+      actions:
+        - name: "view"
+          description: "Can view the list of forms."
+        - name: "manage"
+          description: "Can create and edit form schemas in the builder."
+
+
+    # ==========================================================
+    #    : IDENTITY & ACCESS MANAGEMENT (IAM) ---
+    # ==========================================================
+
+    - key: "module:users"
+      type: "page"
+      displayName: "User Management"
+      description: "Manage tenant users, profiles, and their role assignments."
+      actions:
+        - name: "read"
+          description: "Can view the list of users."
+        - name: "manage"
+          description: "Can create users, update profiles, and assign roles."
+        - name: "delete"
+          description: "DANGEROUS: Can permanently delete users."
+
+    - key: "module:access_control"
+      type: "page"
+      displayName: "Access Control (Roles & Permissions)"
+      description: "Manage system roles, secure resources, and the permission matrix."
+      actions:
+        - name: "read"
+          description: "Can view roles, resources, and the permission matrix."
+        - name: "manage"
+          description: "Can create/edit roles, register resources, and grant permissions."
+        - name: "delete"
+          description: "DANGEROUS: Can delete roles, resources, or revoke permissions."

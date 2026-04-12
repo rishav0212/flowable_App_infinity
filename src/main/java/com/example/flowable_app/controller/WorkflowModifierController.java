@@ -1,6 +1,6 @@
 package com.example.flowable_app.controller;
 
-import com.example.flowable_app.service.UserContextService;
+import com.example.flowable_app.core.security.UserContextService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.flowable.bpmn.model.*;

@@ -1,11 +1,12 @@
-package com.example.flowable_app.service;
+package com.example.flowable_app.features.iam.service;
 
-import com.example.flowable_app.config.CasbinConfig;
+import com.example.flowable_app.core.security.config.CasbinConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.casbin.jcasbin.main.Enforcer;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,32 +56,17 @@ public class CasbinService {
 
     // 5. Admin UI: Fetch existing policies for the Checkbox Matrix
     public List<List<String>> getPoliciesForRole(String roleId, String tenantId, String schemaName) {
-        // getFilteredPolicy(0, ...) searches starting at index 0 (v0/Subject) for roleId, and index 1 for tenantId
         return casbinConfig.getEnforcer(schemaName).getFilteredPolicy(0, roleId, tenantId);
     }
 
-    /**
-     * Fetches all policies associated with a specific resource for a given tenant.
-     * Casbin policy structure: p, roleId, tenantId, resourceKey, action
-     */
-    /**
-     * Fetches all policies associated with a specific resource for a given tenant.
-     * Casbin policy structure: p, roleId, tenantId, resourceKey, action
-     */
     public List<List<String>> getPoliciesForResource(String tenantId, String schemaName, String resourceKey) {
-        // 🟢 Fetch the correct enforcer for this tenant's schema
         Enforcer enforcer = casbinConfig.getEnforcer(schemaName);
-
-        // getFilteredPolicy(1, tenantId, resourceKey) filters on index 1 (tenant) and index 2 (resource)
         return enforcer.getFilteredPolicy(1, tenantId, resourceKey);
     }
 
-// =====================================================================================
+    // =====================================================================================
     // 6. ROLE INHERITANCE (LEAN CASBIN APPROACH)
     // =====================================================================================
-
-    // In Casbin, "adding a role for a user" is structurally identical to "adding a role for a role".
-    // This creates a `g, roleId, inheritsRoleId, tenantId` rule in the casbin_rule table.
 
     public void addRoleInheritance(String roleId, String inheritsRoleId, String tenantId, String schemaName) {
         casbinConfig.getEnforcer(schemaName).addRoleForUserInDomain(roleId, inheritsRoleId, tenantId);
@@ -98,26 +84,20 @@ public class CasbinService {
     // 7. ADVANCED EFFECTIVE ACCESS & CYCLE GUARDS
     // =====================================================================================
 
-    // Cycle Guard: Checks if making 'roleId' inherit 'inheritsRoleId' creates a loop
     public boolean causesCycle(String roleId, String inheritsRoleId, String tenantId, String schemaName) {
         if (roleId.equals(inheritsRoleId)) return true;
 
-        // Casbin's getImplicitRolesForUser gets all roles inherited UP the tree.
-        // If we want 'roleId' to inherit 'inheritsRoleId', we must ensure 'roleId'
-        // is NOT already inside the implicit roles of 'inheritsRoleId'
         List<String> implicitRolesOfTarget = casbinConfig.getEnforcer(schemaName)
                 .getImplicitRolesForUser(inheritsRoleId, tenantId);
         return implicitRolesOfTarget.contains(roleId);
     }
 
-    // Get all roles a user has natively via Casbin (direct + inherited)
     public List<String> getImplicitRolesForUser(String userId, String tenantId, String schemaName) {
         return casbinConfig.getEnforcer(schemaName).getImplicitRolesForUser(userId, tenantId);
     }
 
-    // Fetch policies for a batch of roles efficiently
     public List<List<String>> getPoliciesForRoles(List<String> roles, String tenantId, String schemaName) {
-        List<List<String>> allPolicies = new java.util.ArrayList<>();
+        List<List<String>> allPolicies = new ArrayList<>();
         Enforcer enforcer = casbinConfig.getEnforcer(schemaName);
         for (String role : roles) {
             allPolicies.addAll(enforcer.getFilteredPolicy(0, role, tenantId));
@@ -130,15 +110,12 @@ public class CasbinService {
     // =====================================================================================
 
     public void removePoliciesByResource(String resourceKey, String tenantId, String schemaName) {
-        // Removes all 'p' rules where tenantId is index 1 and resourceKey is index 2
         casbinConfig.getEnforcer(schemaName).removeFilteredPolicy(1, tenantId, resourceKey);
     }
 
     public void removeRoleCompletely(String roleId, String tenantId, String schemaName) {
         Enforcer enforcer = casbinConfig.getEnforcer(schemaName);
-        // Remove direct permission policies assigned to this role
         enforcer.removeFilteredPolicy(0, roleId, tenantId);
-        // Remove inheritance mapping where this role is the child (index 0) or parent (index 1)
         enforcer.removeFilteredGroupingPolicy(0, roleId);
         enforcer.removeFilteredGroupingPolicy(1, roleId);
     }

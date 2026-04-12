@@ -1,5 +1,6 @@
-package com.example.flowable_app.config;
+package com.example.flowable_app.core.security.oauth2;
 
+import com.example.flowable_app.core.security.jwt.JwtUtils;
 import com.example.flowable_app.entity.Tenant;
 import com.example.flowable_app.repository.TenantRepository;
 import jakarta.servlet.http.HttpServletRequest;
