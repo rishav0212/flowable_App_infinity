@@ -8,16 +8,40 @@ import java.util.Map;
 
 /**
  * 🟢 USER CONTEXT SERVICE
- * A centralized service to retrieve the currently authenticated user's identity
- * and tenant details from the Security Context.
+ * Retrieves the currently authenticated user's identity and tenant details.
+ * Supports both HTTP web requests and automated Flowable background jobs.
  */
 @Service
 public class UserContextService {
 
+    // 🟢 Background-job fallback: set by TenantAwareCommandInterceptor before async execution
+    private static final ThreadLocal<String> BACKGROUND_SCHEMA = new ThreadLocal<>();
+
+    /** Called by TenantAwareCommandInterceptor to inject schema for async threads */
+    public static void setBackgroundSchema(String schema) {
+        BACKGROUND_SCHEMA.set(schema);
+    }
+
+    /** Always called in finally{} by TenantAwareCommandInterceptor */
+    public static void clearBackgroundSchema() {
+        BACKGROUND_SCHEMA.remove();
+    }
+
     /**
-     * @return The Tenant ID (e.g., "acme-corp") from the JWT.
-     * @throws SecurityException if the user is not authenticated or lacks a tenant.
+     * @return The schema name associated with the tenant.
      */
+    public String getCurrentTenantSchema() {
+        // 1. Background job (timer, scheduler) — schema injected by interceptor
+        String backgroundSchema = BACKGROUND_SCHEMA.get();
+        if (backgroundSchema != null && !backgroundSchema.trim().isEmpty()) {
+            return backgroundSchema;
+        }
+
+        // 2. Normal HTTP request with JWT
+        Map<String, Object> claims = getPrincipalClaims();
+        return (String) claims.get("schemaName");
+    }
+
     public String getCurrentTenantId() {
         Map<String, Object> claims = getPrincipalClaims();
         String tenantId = (String) claims.get("tenantId");
@@ -28,35 +52,21 @@ public class UserContextService {
         return tenantId;
     }
 
-    /**
-     * @return The User ID (e.g., "Rishab_J") from the JWT.
-     */
     public String getCurrentUserId() {
         Map<String, Object> claims = getPrincipalClaims();
         Object id = claims.get("id");
         return id != null ? id.toString() : "anonymous";
     }
 
-    /**
-     * @return The User's Email from the JWT.
-     */
     public String getCurrentUserEmail() {
         Map<String, Object> claims = getPrincipalClaims();
         return (String) claims.get("email");
     }
 
-    /**
-     * @return The schema name associated with the tenant, if available in the JWT.
-     */
-    public String getCurrentTenantSchema() {
-        Map<String, Object> claims = getPrincipalClaims();
-        return (String) claims.get("schemaName"); // Assuming tenantSlug is the schema name
+    public String getCurrentTenantSlug() {
+        return (String) getClaim("tenantSlug");
     }
 
-
-    /**
-     * Helper to extract the claims Map safely.
-     */
     @SuppressWarnings("unchecked")
     private Map<String, Object> getPrincipalClaims() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -66,11 +76,17 @@ public class UserContextService {
         }
 
         if (!(auth.getPrincipal() instanceof Map)) {
-            // This happens if the Principal is a String "anonymousUser" or similar
             throw new SecurityException("Invalid Principal Type. Expected Map from JWT.");
         }
 
         return (Map<String, Object>) auth.getPrincipal();
     }
 
+    @SuppressWarnings("unchecked")
+    private Object getClaim(String key) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) return null;
+        if (!(auth.getPrincipal() instanceof Map)) return null;
+        return ((Map<String, Object>) auth.getPrincipal()).get(key);
+    }
 }

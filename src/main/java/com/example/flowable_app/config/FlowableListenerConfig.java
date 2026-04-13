@@ -15,15 +15,23 @@ public class FlowableListenerConfig implements EngineConfigurationConfigurer<Spr
 
     @Autowired
     private BusinessKeyEnforcer businessKeyEnforcer;
+
     @Autowired
-    private ProcessDeploymentValidator processDeploymentValidator; // 🟢 Inject generic validator
+    private ProcessDeploymentValidator processDeploymentValidator;
+
+    @Autowired
+    private TenantAwareCommandInterceptor tenantAwareCommandInterceptor; // 🟢 Inject our new command interceptor
+
     @Override
     public void configure(SpringProcessEngineConfiguration engineConfiguration) {
+
+        // 1. Register Event Listeners
         if (engineConfiguration.getEventListeners() == null) {
             engineConfiguration.setEventListeners(new ArrayList<>());
         }
         engineConfiguration.getEventListeners().add(businessKeyEnforcer);
-// 2. Register Custom Validator
+
+        // 2. Register Custom Validator
         ProcessValidatorFactory validatorFactory = new ProcessValidatorFactory();
         ProcessValidator processValidator = validatorFactory.createDefaultProcessValidator();
 
@@ -33,6 +41,12 @@ public class FlowableListenerConfig implements EngineConfigurationConfigurer<Spr
         processValidator.getValidatorSets().add(customSet);
         engineConfiguration.setProcessValidator(processValidator);
 
-        System.out.println("✅ REGISTERED: BusinessKeyEnforcer has been added to Flowable Engine.");
+        // 3. 🟢 Register Command Interceptor for Background/Timer Jobs
+        if (engineConfiguration.getCustomPreCommandInterceptors() == null) {
+            engineConfiguration.setCustomPreCommandInterceptors(new ArrayList<>());
+        }
+        engineConfiguration.getCustomPreCommandInterceptors().add(tenantAwareCommandInterceptor);
+
+        System.out.println("✅ REGISTERED: BusinessKeyEnforcer, Validators, and TenantAwareCommandInterceptor.");
     }
 }
