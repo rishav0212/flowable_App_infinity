@@ -2,7 +2,7 @@ package com.example.flowable_app.core.security.tenant;
 
 import com.example.flowable_app.entity.Tenant;
 import com.example.flowable_app.repository.TenantRepository;
-import com.example.flowable_app.service.UserContextService;
+import com.example.flowable_app.core.security.UserContextService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.flowable.common.engine.impl.interceptor.AbstractCommandInterceptor;
