@@ -1,18 +1,13 @@
 package com.example.flowable_app.controller;
 
+import com.example.flowable_app.client.FormIoClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
-import jakarta.servlet.http.HttpServletRequest;
 import org.flowable.engine.HistoryService;
 import org.flowable.engine.history.HistoricProcessInstance;
 import org.flowable.variable.api.history.HistoricVariableInstance;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.client.RestTemplate;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -25,15 +20,13 @@ import java.util.stream.Collectors;
 public class ToolJetDynamicBulkController {
 
     private final HistoryService historyService;
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final FormIoClient formIoClient; // 🟢 We use your native FormIoClient instead of RestTemplate
     private final ExecutorService executorService = Executors.newFixedThreadPool(50);
-    private final ObjectMapper objectMapper = new ObjectMapper(); // 🟢 Used for safe JSON parsing
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Value("${app.backend.url:http://localhost:8080}")
-    private String backendUrl;
-
-    public ToolJetDynamicBulkController(HistoryService historyService) {
+    public ToolJetDynamicBulkController(HistoryService historyService, FormIoClient formIoClient) {
         this.historyService = historyService;
+        this.formIoClient = formIoClient;
     }
 
     @PreDestroy
@@ -44,21 +37,16 @@ public class ToolJetDynamicBulkController {
     @PostMapping("/bulk-by-task-ids")
     public ResponseEntity<?> getBulkFormData(
             @RequestBody List<String> taskIds,
-            @RequestParam(required = false) String processDefinitionKey,
-            HttpServletRequest request) {
+            @RequestParam(required = false) String processDefinitionKey) {
 
         if (taskIds == null || taskIds.isEmpty()) {
             return ResponseEntity.ok(Collections.emptyList());
         }
 
-        // 🟢 Extract all possible Auth/Tenant headers from the main thread
-        final String authHeader = request.getHeader("Authorization");
-        final String cookieHeader = request.getHeader("Cookie");
-        final String tenantHeader = request.getHeader("x-tenant-id");
-
+        // 🟢 No headers needed! We let the background threads do all the work independently.
         List<CompletableFuture<Map<String, Object>>> futures = taskIds.stream()
                 .map(taskId -> CompletableFuture.supplyAsync(() ->
-                        fetchSingleTaskData(taskId, processDefinitionKey, authHeader, cookieHeader, tenantHeader), executorService))
+                        fetchSingleTaskData(taskId, processDefinitionKey), executorService))
                 .collect(Collectors.toList());
 
         List<Map<String, Object>> results = futures.stream()
@@ -69,7 +57,7 @@ public class ToolJetDynamicBulkController {
         return ResponseEntity.ok(results);
     }
 
-    private Map<String, Object> fetchSingleTaskData(String taskIdC, String processDefinitionKey, String authHeader, String cookieHeader, String tenantHeader) {
+    private Map<String, Object> fetchSingleTaskData(String taskIdC, String processDefinitionKey) {
         Map<String, Object> response = new HashMap<>();
         response.put("TASK_ID_C", taskIdC);
         response.put("ACTION_TAKEN", "PENDING");
@@ -89,7 +77,12 @@ public class ToolJetDynamicBulkController {
                 return response;
             }
 
-            String processInstanceId = instances.get(0).getId();
+            HistoricProcessInstance processInstance = instances.get(0);
+            String processInstanceId = processInstance.getId();
+
+            // 🟢 Extract the tenant directly from Flowable's database record
+            String tenantId = processInstance.getTenantId();
+
             response.put("PROCESS_INSTANCE_ID", processInstanceId);
 
             // HOP 2: Fetch Variables
@@ -128,36 +121,18 @@ public class ToolJetDynamicBulkController {
                 return response;
             }
 
-            // HOP 3: Fetch Form Data via Internal Proxy
-            String proxyUrl = backendUrl + "/api/forms/" + formKey + "/submission/" + submissionId;
+            // HOP 3: Fetch Form Data natively using FormIoClient
+            // 🟢 Bypass the HTTP loopback completely and talk directly to Form.io
+            // HOP 3: Fetch Form Data natively using FormIoClient
+            // 🟢 Notice how much cleaner this is! No JSON parsing required.
+            Map<String, Object> formPayload = formIoClient.getSubmission(formKey, submissionId);
 
-            HttpHeaders headers = new HttpHeaders();
-            if (authHeader != null) headers.set("Authorization", authHeader);
-            if (cookieHeader != null) headers.set("Cookie", cookieHeader);
-            if (tenantHeader != null) headers.set("x-tenant-id", tenantHeader); // 🟢 Crucial for internal loopback
-            headers.set("Accept", "application/json");
+            if (formPayload != null && formPayload.containsKey("data")) {
+                Map<String, Object> actualFormData = (Map<String, Object>) formPayload.get("data");
 
-            HttpEntity<String> entity = new HttpEntity<>(headers);
-
-            // 🟢 FIX: Fetch as a raw String first so RestTemplate doesn't crash on HTML redirects
-            ResponseEntity<String> proxyRes = restTemplate.exchange(proxyUrl, HttpMethod.GET, entity, String.class);
-
-            if (proxyRes.getStatusCode().is2xxSuccessful() && proxyRes.getBody() != null) {
-                String rawBody = proxyRes.getBody().trim();
-
-                // 🟢 Safely verify the response is JSON and not an HTML login/error page
-                if (rawBody.startsWith("{")) {
-                    Map<String, Object> formPayload = objectMapper.readValue(rawBody, Map.class);
-                    if (formPayload.containsKey("data")) {
-                        Map<String, Object> actualFormData = (Map<String, Object>) formPayload.get("data");
-
-                        Map<String, Object> flatData = new HashMap<>();
-                        flattenJson(flatData, actualFormData, "");
-                        response.putAll(flatData);
-                    }
-                } else {
-                    response.put("_error", "Proxy returned HTML instead of JSON. Auth likely failed.");
-                }
+                Map<String, Object> flatData = new HashMap<>();
+                flattenJson(flatData, actualFormData, "");
+                response.putAll(flatData);
             }
 
         } catch (Exception e) {

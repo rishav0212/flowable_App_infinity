@@ -25,6 +25,12 @@ public interface FormIoClient {
 
     @GetMapping("/form/{formId}")
     Map<String, Object> getForm(@PathVariable("formId") String formId);
-
+    // 🟢 ADD THIS MISSING METHOD
+    // Automatically fetches and converts the submission JSON into a Map
+    @GetMapping("/{formKey}/submission/{submissionId}")
+    Map<String, Object> getSubmission(
+            @PathVariable("formKey") String formKey,
+            @PathVariable("submissionId") String submissionId
+    );
 
 }
