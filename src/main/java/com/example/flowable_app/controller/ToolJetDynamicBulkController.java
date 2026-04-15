@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 public class ToolJetDynamicBulkController {
 
     private final HistoryService historyService;
-    private final FormIoClient formIoClient; // 🟢 We use your native FormIoClient instead of RestTemplate
+    private final FormIoClient formIoClient;
     private final ExecutorService executorService = Executors.newFixedThreadPool(50);
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -34,19 +34,22 @@ public class ToolJetDynamicBulkController {
         executorService.shutdown();
     }
 
+    // 🟢 NEW: A simple record to hold both the Task ID and the Process Key for each row
+    public record TaskQueryRequest(String taskId, String processKey) {}
+
     @PostMapping("/bulk-by-task-ids")
     public ResponseEntity<?> getBulkFormData(
-            @RequestBody List<String> taskIds,
-            @RequestParam(required = false) String processDefinitionKey) {
+            @RequestBody List<TaskQueryRequest> taskRequests) { // 🟢 Accept the new object structure
 
-        if (taskIds == null || taskIds.isEmpty()) {
+        if (taskRequests == null || taskRequests.isEmpty()) {
             return ResponseEntity.ok(Collections.emptyList());
         }
 
-        // 🟢 No headers needed! We let the background threads do all the work independently.
-        List<CompletableFuture<Map<String, Object>>> futures = taskIds.stream()
-                .map(taskId -> CompletableFuture.supplyAsync(() ->
-                        fetchSingleTaskData(taskId, processDefinitionKey), executorService))
+        // 🟢 Pass the specific processKey for each individual row into the background thread
+        List<CompletableFuture<Map<String, Object>>> futures = taskRequests.stream()
+                .filter(req -> req.taskId() != null && !req.taskId().trim().isEmpty())
+                .map(req -> CompletableFuture.supplyAsync(() ->
+                        fetchSingleTaskData(req.taskId(), req.processKey()), executorService))
                 .collect(Collectors.toList());
 
         List<Map<String, Object>> results = futures.stream()
@@ -68,7 +71,8 @@ public class ToolJetDynamicBulkController {
                     .variableValueEquals("TASK_ID_C", taskIdC)
                     .orderByProcessInstanceStartTime().desc();
 
-            if (processDefinitionKey != null && !processDefinitionKey.isEmpty()) {
+            // 🟢 Uses the specific key passed from this exact row
+            if (processDefinitionKey != null && !processDefinitionKey.trim().isEmpty()) {
                 query.processDefinitionKey(processDefinitionKey);
             }
 
@@ -79,8 +83,6 @@ public class ToolJetDynamicBulkController {
 
             HistoricProcessInstance processInstance = instances.get(0);
             String processInstanceId = processInstance.getId();
-
-            // 🟢 Extract the tenant directly from Flowable's database record
             String tenantId = processInstance.getTenantId();
 
             response.put("PROCESS_INSTANCE_ID", processInstanceId);
@@ -121,10 +123,7 @@ public class ToolJetDynamicBulkController {
                 return response;
             }
 
-            // HOP 3: Fetch Form Data natively using FormIoClient
-            // 🟢 Bypass the HTTP loopback completely and talk directly to Form.io
-            // HOP 3: Fetch Form Data natively using FormIoClient
-            // 🟢 Notice how much cleaner this is! No JSON parsing required.
+            // HOP 3: Fetch Form Data via native FormIoClient
             Map<String, Object> formPayload = formIoClient.getSubmission(formKey, submissionId);
 
             if (formPayload != null && formPayload.containsKey("data")) {
