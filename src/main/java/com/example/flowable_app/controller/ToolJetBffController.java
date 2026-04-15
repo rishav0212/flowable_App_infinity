@@ -1,13 +1,13 @@
 package com.example.flowable_app.controller;
 
+import com.example.flowable_app.core.security.UserContextService;
 import com.example.flowable_app.entity.Tenant;
 import com.example.flowable_app.entity.ToolJetWorkspace;
+import com.example.flowable_app.features.iam.service.AllowedUserService;
 import com.example.flowable_app.repository.TenantRepository;
 import com.example.flowable_app.repository.ToolJetWorkspaceRepository;
 import com.example.flowable_app.repository.TooljetWorkspaceAppRepository;
-import com.example.flowable_app.features.iam.service.AllowedUserService;
 import com.example.flowable_app.service.ToolJetAuthService;
-import com.example.flowable_app.core.security.UserContextService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -138,7 +138,7 @@ public class ToolJetBffController {
 
             // Result: /applications/<app-id>?userId= ?
             String cleanPathForBrowser = fullPath.substring(fullPath.indexOf("/applications/"))
-                    + "?userId=" + verifiedId +"&userEmail=" + userEmail;
+                    + "?userId=" + verifiedId + "&userEmail=" + userEmail;
 
             // Use the modified path for the script injection
             return injectUrlFixerScript(executeProxyWithRetry(targetPath, request, userEmail, body, tenantId),
@@ -228,7 +228,7 @@ public class ToolJetBffController {
             } catch (HttpStatusCodeException e) {
                 if (e.getStatusCode() == HttpStatus.UNAUTHORIZED) {
                     log.warn("🔄 [SECURE RUN] Session expired. Refreshing...");
-                    authService.clearSession(tenantId); // 🟢 Clear specific tenant session
+                    authService.clearSession(tenantId); // Clear specific tenant session
                     queryMeta = fetchQueryMetadata(queryId, appSlug, tenantId);
                 } else {
                     throw e;
@@ -262,11 +262,30 @@ public class ToolJetBffController {
 
             log.debug("📜 [SECURE RUN] Raw SQL: {}", originalSql);
 
+            // ==============================================================================
+            // 🟢 NEW: Evaluate and Replace ToolJet UI Variables ({{components...}})
+            // ==============================================================================
+            String finalSql = originalSql;
+            if (body != null && body.containsKey("resolvedOptions")) {
+                Map<String, Object> resolvedOptions = (Map<String, Object>) body.get("resolvedOptions");
+
+                for (Map.Entry<String, Object> entry : resolvedOptions.entrySet()) {
+                    String key = entry.getKey();
+                    String value = entry.getValue() != null ? String.valueOf(entry.getValue()) : "";
+
+                    // Ensure the key has the mustache brackets to match the SQL string
+                    String targetToReplace = key.startsWith("{{") ? key : "{{" + key + "}}";
+                    finalSql = finalSql.replace(targetToReplace, value);
+                }
+            }
+            // ==============================================================================
+
             Map<String, Object> params = (body != null && body.containsKey("params"))
                     ? (Map<String, Object>) body.get("params")
                     : new HashMap<>();
 
-            SqlAndBindings prepared = convertToPreparedSql(originalSql, params);
+            // Pass the newly replaced finalSql here instead of originalSql
+            SqlAndBindings prepared = convertToPreparedSql(finalSql, params);
             log.info("🔧 [SECURE RUN] Executing SQL: {}", prepared.sql);
 
             // 5. Execute with RLS
@@ -285,12 +304,33 @@ public class ToolJetBffController {
                 return jdbcTemplate.queryForList(prepared.sql, prepared.args);
             });
 
+            // ==============================================================================
+            // 🟢 NEW: Sanitize Postgres Arrays (Fixes Jackson 500 Serialization Error)
+            // ==============================================================================
+            if (results != null) {
+                for (Map<String, Object> row : results) {
+                    for (Map.Entry<String, Object> entry : row.entrySet()) {
+                        Object value = entry.getValue();
+                        // If it's a native DB Array (like PgArray), convert it to a standard Java array
+                        if (value instanceof java.sql.Array sqlArray) {
+                            try {
+                                entry.setValue(sqlArray.getArray());
+                            } catch (Exception e) {
+                                log.warn("⚠️ Failed to parse SQL Array for column {}", entry.getKey(), e);
+                            }
+                        }
+                    }
+                }
+            }
+            // ==============================================================================
+
             log.info("✅ [SECURE RUN] Success. Fetched {} rows.", results != null ? results.size() : 0);
             Map<String, Object> response = new HashMap<>();
             response.put("data", results);
             response.put("status", "ok");
 
             return ResponseEntity.ok(response);
+
         } catch (IllegalArgumentException e) {
             log.warn("🚨 [SECURE RUN] Bad Request: {}", e.getMessage());
             return ResponseEntity.badRequest().body(e.getMessage());
