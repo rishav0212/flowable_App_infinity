@@ -6,6 +6,8 @@ package com.example.flowable_app.core.exception;
  */
 public final class ErrorCode {
 
+    public static final String RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND";
+
     private ErrorCode() {} // Prevent instantiation
 
     // ─── General ───────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -36,7 +37,7 @@ public class ResourceController {
 
     @Operation(summary = "Get all resources",
             description = "Lists all securable resources and their associated actions in the tenant.")
-    @RequiresPermission(resource = "module:access_control", action = "view")
+    @RequiresPermission(resource = "module:access_control", action = "read")
     @GetMapping
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getResources() {
         String schema = userContextService.getCurrentTenantSchema();
@@ -47,6 +48,7 @@ public class ResourceController {
             description = "Registers a new business entity or UI module that requires access control.")
     @RequiresPermission(resource = "module:access_control", action = "manage")
     @PostMapping
+    @Transactional
     public ResponseEntity<ApiResponse<Void>> createResource(
             @Valid @RequestBody IamDto.Resource.CreateRequest request) {
 
@@ -79,6 +81,7 @@ public class ResourceController {
             description = "Removes a resource and ALL associated Casbin policies for this resource across all roles.")
     @RequiresPermission(resource = "module:access_control", action = "delete")
     @DeleteMapping("/{resourceKey}")
+    @Transactional
     public ResponseEntity<ApiResponse<Void>> deleteResource(@PathVariable String resourceKey) {
         String schema = userContextService.getCurrentTenantSchema();
         String tenantId = userContextService.getCurrentTenantId();
@@ -98,6 +101,7 @@ public class ResourceController {
             description = "Attaches a new dynamic action (e.g., 'approve', 'export') to an existing resource.")
     @RequiresPermission(resource = "module:access_control", action = "manage")
     @PostMapping("/{resourceKey}/actions")
+    @Transactional
     public ResponseEntity<ApiResponse<Void>> addCustomAction(
             @PathVariable String resourceKey,
             @Valid @RequestBody IamDto.Resource.CustomActionRequest request) {

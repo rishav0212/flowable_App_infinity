@@ -1,7 +1,7 @@
 package com.example.flowable_app.core.security.annotation;
 
-import com.example.flowable_app.features.iam.service.CasbinService;
 import com.example.flowable_app.core.security.UserContextService;
+import com.example.flowable_app.features.iam.service.CasbinService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.JoinPoint;
@@ -41,5 +41,35 @@ public class PermissionAspect {
                     ") for resource: " +
                     perm.resource());
         }
+    }
+
+
+    @Before("@annotation(anyPerm)")
+    public void checkAny(JoinPoint jp, RequiresAnyPermission anyPerm) {
+        String userId = userContextService.getCurrentUserId();
+        String tenantId = userContextService.getCurrentTenantId();
+        String schema = userContextService.getCurrentTenantSchema();
+
+        // Super Admin Bypass
+        if ("Rishab_J".equals(userId)) return;
+
+        for (String permString : anyPerm.value()) {
+            // Split by the LAST colon so "module:users:read" becomes "module:users" and "read"
+            int lastColonIdx = permString.lastIndexOf(":");
+
+            if (lastColonIdx > 0) {
+                String resource = permString.substring(0, lastColonIdx);
+                String action = permString.substring(lastColonIdx + 1);
+
+                // If the user has ANY of the permissions in the array, grant access and exit!
+                if (casbinService.canDo(userId, tenantId, schema, resource, action)) {
+                    return;
+                }
+            }
+        }
+
+        // If it finishes the loop without returning, they don't have any of the required permissions
+        throw new AccessDeniedException("Casbin Security: You need at least one of the required permissions: " +
+                String.join(", ", anyPerm.value()));
     }
 }
