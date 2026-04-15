@@ -1,5 +1,6 @@
 package com.example.flowable_app.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import jakarta.servlet.http.HttpServletRequest;
 import org.flowable.engine.HistoryService;
@@ -26,6 +27,7 @@ public class ToolJetDynamicBulkController {
     private final HistoryService historyService;
     private final RestTemplate restTemplate = new RestTemplate();
     private final ExecutorService executorService = Executors.newFixedThreadPool(50);
+    private final ObjectMapper objectMapper = new ObjectMapper(); // 🟢 Used for safe JSON parsing
 
     @Value("${app.backend.url:http://localhost:8080}")
     private String backendUrl;
@@ -49,15 +51,14 @@ public class ToolJetDynamicBulkController {
             return ResponseEntity.ok(Collections.emptyList());
         }
 
-        // 🟢 BUG FIX 1: Extract Auth headers from the MAIN thread.
-        // Spring Security Context is lost when passed to the background ExecutorService.
-        // We MUST extract the tokens here and pass them as raw strings to the threads.
+        // 🟢 Extract all possible Auth/Tenant headers from the main thread
         final String authHeader = request.getHeader("Authorization");
         final String cookieHeader = request.getHeader("Cookie");
+        final String tenantHeader = request.getHeader("x-tenant-id");
 
         List<CompletableFuture<Map<String, Object>>> futures = taskIds.stream()
                 .map(taskId -> CompletableFuture.supplyAsync(() ->
-                        fetchSingleTaskData(taskId, processDefinitionKey, authHeader, cookieHeader), executorService))
+                        fetchSingleTaskData(taskId, processDefinitionKey, authHeader, cookieHeader, tenantHeader), executorService))
                 .collect(Collectors.toList());
 
         List<Map<String, Object>> results = futures.stream()
@@ -68,10 +69,10 @@ public class ToolJetDynamicBulkController {
         return ResponseEntity.ok(results);
     }
 
-    private Map<String, Object> fetchSingleTaskData(String taskIdC, String processDefinitionKey, String authHeader, String cookieHeader) {
+    private Map<String, Object> fetchSingleTaskData(String taskIdC, String processDefinitionKey, String authHeader, String cookieHeader, String tenantHeader) {
         Map<String, Object> response = new HashMap<>();
         response.put("TASK_ID_C", taskIdC);
-        response.put("ACTION_TAKEN", "PENDING"); // Initialize early just like Python
+        response.put("ACTION_TAKEN", "PENDING");
 
         try {
             // HOP 1: Find Process Instance
@@ -96,14 +97,13 @@ public class ToolJetDynamicBulkController {
                     .processInstanceId(processInstanceId)
                     .list();
 
-            // 🟢 BUG FIX 2: Replicate Python's exact sorting logic (Newest Updates First)
             variables.sort((v1, v2) -> {
                 Date d1 = v1.getLastUpdatedTime() != null ? v1.getLastUpdatedTime() : v1.getCreateTime();
                 Date d2 = v2.getLastUpdatedTime() != null ? v2.getLastUpdatedTime() : v2.getCreateTime();
                 if (d1 == null && d2 == null) return 0;
                 if (d1 == null) return 1;
                 if (d2 == null) return -1;
-                return d2.compareTo(d1); // Reverse sort (descending)
+                return d2.compareTo(d1);
             });
 
             String submissionId = null;
@@ -113,7 +113,6 @@ public class ToolJetDynamicBulkController {
                 String name = var.getVariableName();
                 Object val = var.getValue();
 
-                // 🟢 BUG FIX 3: Replicate Python's exact conditional assignment logic
                 if ("action".equals(name) && "PENDING".equals(response.get("ACTION_TAKEN"))) {
                     if (val != null && !val.toString().trim().isEmpty()) {
                         response.put("ACTION_TAKEN", val.toString());
@@ -132,29 +131,37 @@ public class ToolJetDynamicBulkController {
             // HOP 3: Fetch Form Data via Internal Proxy
             String proxyUrl = backendUrl + "/api/forms/" + formKey + "/submission/" + submissionId;
 
-            // 🟢 BUG FIX 4: Inject Authorization into RestTemplate
-            // Without this, the proxy was returning 401 Unauthorized silently
             HttpHeaders headers = new HttpHeaders();
             if (authHeader != null) headers.set("Authorization", authHeader);
             if (cookieHeader != null) headers.set("Cookie", cookieHeader);
+            if (tenantHeader != null) headers.set("x-tenant-id", tenantHeader); // 🟢 Crucial for internal loopback
             headers.set("Accept", "application/json");
 
             HttpEntity<String> entity = new HttpEntity<>(headers);
-            ResponseEntity<Map> proxyRes = restTemplate.exchange(proxyUrl, HttpMethod.GET, entity, Map.class);
+
+            // 🟢 FIX: Fetch as a raw String first so RestTemplate doesn't crash on HTML redirects
+            ResponseEntity<String> proxyRes = restTemplate.exchange(proxyUrl, HttpMethod.GET, entity, String.class);
 
             if (proxyRes.getStatusCode().is2xxSuccessful() && proxyRes.getBody() != null) {
-                Map<String, Object> formPayload = proxyRes.getBody();
-                if (formPayload.containsKey("data")) {
-                    Map<String, Object> actualFormData = (Map<String, Object>) formPayload.get("data");
+                String rawBody = proxyRes.getBody().trim();
 
-                    Map<String, Object> flatData = new HashMap<>();
-                    flattenJson(flatData, actualFormData, "");
-                    response.putAll(flatData);
+                // 🟢 Safely verify the response is JSON and not an HTML login/error page
+                if (rawBody.startsWith("{")) {
+                    Map<String, Object> formPayload = objectMapper.readValue(rawBody, Map.class);
+                    if (formPayload.containsKey("data")) {
+                        Map<String, Object> actualFormData = (Map<String, Object>) formPayload.get("data");
+
+                        Map<String, Object> flatData = new HashMap<>();
+                        flattenJson(flatData, actualFormData, "");
+                        response.putAll(flatData);
+                    }
+                } else {
+                    response.put("_error", "Proxy returned HTML instead of JSON. Auth likely failed.");
                 }
             }
 
         } catch (Exception e) {
-            response.put("_error", e.getMessage()); // Named _error so it doesn't overwrite business data
+            response.put("_error", e.getMessage());
         }
 
         return response;
